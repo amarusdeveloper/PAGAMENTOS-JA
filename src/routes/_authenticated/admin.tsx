@@ -5,6 +5,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { MasterOverview } from "@/components/master-overview";
+import { AlertaAsaasExpiracao } from "@/components/alerta-asaas-expiracao";
 import { alterarAtivacaoSuporte } from "@/lib/plataforma.functions";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState, ErrorState, LoadingBloco } from "@/components/states";
@@ -80,6 +81,8 @@ function Admin() {
       titulo="Administração Já"
       descricao="Agências, planos, cupons e receita da plataforma"
     >
+      <AlertaAsaasExpiracao />
+
       <Tabs defaultValue="visao">
         <TabsList className="flex h-auto flex-wrap">
           <TabsTrigger value="visao">Visão global</TabsTrigger>

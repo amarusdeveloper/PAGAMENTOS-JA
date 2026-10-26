@@ -15,12 +15,15 @@ export default defineConfig({
   vite: {
     define: {
       "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(
-        "https://vqkpirqipvigyqxdanau.supabase.co",
+        process.env["VITE_SUPABASE_URL"] || "https://rutmjtmirwcyoroyjqdy.supabase.co",
       ),
       "import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY": JSON.stringify(
-        "sb_publishable_kSrIm2-vOW0quRfq-3KMRQ_s7sBRze9",
+        process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+          "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf",
       ),
-      "import.meta.env.VITE_SUPABASE_PROJECT_ID": JSON.stringify("vqkpirqipvigyqxdanau"),
+      "import.meta.env.VITE_SUPABASE_PROJECT_ID": JSON.stringify(
+        process.env["VITE_SUPABASE_PROJECT_ID"] || "rutmjtmirwcyoroyjqdy",
+      ),
     },
     optimizeDeps: {
       exclude: ["@tanstack/start-server-core"],

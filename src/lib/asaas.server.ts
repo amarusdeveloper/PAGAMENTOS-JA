@@ -7,7 +7,11 @@
 export type AmbienteAsaas = "sandbox" | "producao";
 
 function baseUrl(): string {
-  const amb = (process.env["ASAAS_ENVIRONMENT"] ?? "sandbox") as AmbienteAsaas;
+  const chave = process.env["ASAAS_API_KEY"] ?? "";
+  if (chave.startsWith("$aact_prod_")) {
+    return "https://api.asaas.com/v3";
+  }
+  const amb = (process.env["ASAAS_ENVIRONMENT"] ?? process.env["ASAAS_AMBIENTE"] ?? "sandbox") as AmbienteAsaas;
   return amb === "producao" ? "https://api.asaas.com/v3" : "https://api-sandbox.asaas.com/v3";
 }
 
@@ -88,6 +92,7 @@ export async function garantirClienteAsaas(dados: {
       email: dados.email ?? undefined,
       mobilePhone: dados.telefone ?? undefined,
       externalReference: dados.referenciaExterna,
+      notificationDisabled: true,
     },
   });
   return criado.id;

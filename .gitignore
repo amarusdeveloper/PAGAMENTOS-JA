@@ -44,3 +44,7 @@ dist-ssr
 # AI Studio artifacts & temp storage
 .aistudio/
 .tempmediaStorage/
+
+# Vercel deployment artifacts
+.vercel/
+.output/

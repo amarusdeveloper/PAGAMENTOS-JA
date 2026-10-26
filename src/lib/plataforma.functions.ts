@@ -88,3 +88,40 @@ export const alterarAtivacaoSuporte = createServerFn({ method: "POST" })
     if (r.error) throw new Error("Não foi possível alterar a ativação.");
     return { ativo: data.ativo };
   });
+
+export const obterStatusApiAsaas = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    if (!context.contexto.papeisPlataforma.includes("admin_master"))
+      throw new Error("Acesso restrito à administração master.");
+
+    const chave = process.env["ASAAS_API_KEY"] ?? "";
+    const configurada = Boolean(chave);
+    const ehProducao =
+      chave.startsWith("$aact_prod_") ||
+      process.env["ASAAS_ENVIRONMENT"] === "producao" ||
+      process.env["ASAAS_AMBIENTE"] === "producao";
+
+    // Expiração da chave informada: 31/12/2026 às 00:00:00 (ou configurável via env)
+    const dataExpiracaoStr = process.env["ASAAS_API_KEY_EXPIRATION"] || "2026-12-31T00:00:00Z";
+    const dataExpiracao = new Date(dataExpiracaoStr);
+    const agora = new Date();
+    const diffMs = dataExpiracao.getTime() - agora.getTime();
+    const diasRestantes = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+
+    // Exibir máscara segura do token para validação sem expor a chave inteira
+    const chaveMascarada = configurada
+      ? `${chave.slice(0, 15)}...${chave.slice(-6)}`
+      : null;
+
+    return {
+      configurada,
+      ambiente: ehProducao ? "producao" : "sandbox",
+      expiraEm: dataExpiracao.toISOString(),
+      diasRestantes,
+      chaveMascarada,
+      expirada: diffMs <= 0,
+      alertaUrgente: diasRestantes <= 15,
+      alertaAtencao: diasRestantes <= 45,
+    };
+  });
