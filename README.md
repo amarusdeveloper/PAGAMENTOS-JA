@@ -1,6 +1,6 @@
 # Já — Gestão de Equipes e Pagamentos
 
-[![CI](https://github.com/seu-usuario/ja-gestao/actions/workflows/ci.yml/badge.svg)](https://github.com/seu-usuario/ja-gestao/actions/workflows/ci.yml)
+[![CI](https://github.com/seu-usuario/PAGAMENTOS-JA/actions/workflows/ci.yml/badge.svg)](https://github.com/seu-usuario/PAGAMENTOS-JA/actions/workflows/ci.yml)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
 [![TanStack Start](https://img.shields.io/badge/TanStack_Start-1.121-orange.svg)](https://tanstack.com/start)
@@ -87,8 +87,8 @@ Para máxima transparência técnica, o estado de cada capacidade do sistema é 
 
 ### 1. Clonar o Repositório
 ```bash
-git clone https://github.com/seu-usuario/ja-gestao.git
-cd ja-gestao
+git clone https://github.com/seu-usuario/PAGAMENTOS-JA.git
+cd PAGAMENTOS-JA
 ```
 
 ### 2. Instalar Dependências
