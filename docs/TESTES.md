@@ -4,7 +4,7 @@
 **Runner:** Vitest v5.0.5  
 **Total de Arquivos de Teste:** 22 suítes  
 **Total de Testes:** 99 testes (100% de aprovação)  
-**Tempo de Execução:** ~7.6 segundos  
+**Tempo de Execução:** ~7.6 segundos
 
 ---
 
@@ -29,6 +29,7 @@ npm run scan:secrets
 ## 2. Mapa Completo de Suítes e Casos de Teste
 
 ### 2.1. Segurança, Multi-Tenancy e Idempotência
+
 1. **`src/lib/multi-tenant.test.ts` (5 testes)**
    - Isolamento estrito de eventos: Organização A nunca enxerga dados da Organização B.
    - Isolamento de pagamentos: Organização B não lista transações da Organização A.
@@ -61,6 +62,7 @@ npm run scan:secrets
 ---
 
 ### 2.2. Antifraude, Ponto Eletrônico e Geolocalização
+
 6. **`src/routes/ponto.$token.test.ts` (5 testes)**
    - Validação de expiração de token do evento (tolerância máxima 12 horas).
    - Cálculo Haversine de distância GPS contra as coordenadas do evento.
@@ -71,6 +73,7 @@ npm run scan:secrets
 ---
 
 ### 2.3. Financeiro, Tesouraria e Fechamento
+
 7. **`src/lib/tesouraria.test.ts` (3 testes)**
    - Segregação contábil entre saldo real bancário, funding de clientes e receita de agência.
    - Consolidação de extrato financeiro.
@@ -94,6 +97,7 @@ npm run scan:secrets
 ---
 
 ### 2.4. Gestão de Pessoas, Cadastros e CLT
+
 11. **`src/routes/_authenticated/cadastros.test.ts` (5 testes)**
     - Validação de CPF e chave Pix para contratação de freelancers.
     - Validação de CNPJ e dados cadastrais de agências e contratantes.
@@ -106,6 +110,7 @@ npm run scan:secrets
 ---
 
 ### 2.5. Operação de Eventos, Navegação e Planos SaaS
+
 13. **`src/routes/_authenticated/eventos.test.ts` (5 testes)**
     - Criação de eventos com datas, horários e coordenadas geográficas.
     - Alocação de colaboradores em escalas.

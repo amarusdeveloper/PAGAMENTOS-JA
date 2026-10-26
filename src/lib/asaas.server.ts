@@ -11,7 +11,9 @@ function baseUrl(): string {
   if (chave.startsWith("$aact_prod_")) {
     return "https://api.asaas.com/v3";
   }
-  const amb = (process.env["ASAAS_ENVIRONMENT"] ?? process.env["ASAAS_AMBIENTE"] ?? "sandbox") as AmbienteAsaas;
+  const amb = (process.env["ASAAS_ENVIRONMENT"] ??
+    process.env["ASAAS_AMBIENTE"] ??
+    "sandbox") as AmbienteAsaas;
   return amb === "producao" ? "https://api.asaas.com/v3" : "https://api-sandbox.asaas.com/v3";
 }
 

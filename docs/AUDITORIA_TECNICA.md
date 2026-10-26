@@ -11,6 +11,7 @@
 ## 1. Inventário Arquitetural do Sistema
 
 ### 1.1. Estrutura do Repositório
+
 - **`src/routes/`**: Rotas baseadas em arquivo pelo TanStack Router.
   - `src/routes/__root.tsx`: Layout raiz com metatags SEO e providers.
   - `src/routes/index.tsx`: Landing page institucional da plataforma Já.
@@ -33,32 +34,34 @@
 
 ## 2. Matriz de Rastreabilidade de Rotas e Funções de Servidor
 
-| Rota / Endpoint | Acesso / Papéis | Server Function / Lógica | Tabelas Supabase Acessadas | Políticas RLS / Segurança | Teste de Cobertura |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| `/` | Público | Renderização SSR estática | Nenhuma | Nenhuma | N/A |
-| `/login` | Público | Autenticação Supabase Auth | `auth.users`, `usuarios_perfis` | Pública / Sanitização de credenciais | `cadastros.test.ts` |
-| `/ponto/$token` | Público (Token) | `obterEventoPonto`, `registrarPontoPublico` | `eventos`, `pontos`, `colaboradores` | Validação de token (expiração 12h), GPS Haversine, Rate-limit por IP | `ponto.$token.test.ts` |
-| `/painel` | Autenticado (`admin`, `coordenador`) | `obterMetricasOperacionaisPainel` | `eventos`, `escalas`, `pontos`, `fechamentos`, `pagamentos` | RLS estrito por `empresa_id` (`empresa_atual()`) | `operacao.test.ts`, `saldo.test.ts` |
-| `/eventos` | Autenticado (`admin`, `coordenador`) | `listarEventos`, `criarEvento` | `eventos`, `clientes`, `escalas` | RLS: `empresa_id = empresa_atual()` | `eventos.test.ts` |
-| `/operacao/$eventoId` | Autenticado (`admin`, `coordenador`) | `obterOperacaoAoVivo`, `aprovarPonto` | `eventos`, `escalas`, `pontos` | Auditoria de supervisor, bloqueio de adulteração de tenant | `operacao.test.ts` |
-| `/fechamentos` | Autenticado (`admin`, `financeiro`) | `calcularFechamentoLote`, `consolidarFechamento` | `fechamentos`, `escalas`, `pagamentos` | RLS: leitura e escrita exclusivas do tenant | `financeiro-fechamento.test.ts` |
-| `/financeiro` | Autenticado (`admin`, `financeiro`) | `obterExtratoTesouraria`, `solicitarFunding` | `cobrancas`, `movimentos_saldo`, `fundings` | Segregação estrita de saldos (funding vs receita própria) | `tesouraria.test.ts`, `saldo.test.ts` |
-| `/freelancers` | Autenticado (`admin`, `coordenador`) | `listarFreelancers`, `cadastrarColaborador` | `colaboradores`, `contas_bancarias_pix` | Validação de CPF/Chave Pix (Frela vs CLT) | `cadastros.test.ts`, `folha-clt.test.ts` |
-| `/configuracoes` | Autenticado (`admin`) | `atualizarConfiguracaoEmpresa`, `gerenciarPlano` | `empresas`, `planos_assinatura`, `taxas_plataforma` | Verificação de role `admin` da empresa | `configuracoes-plano.test.ts` |
-| `/plataforma/admin` | Autenticado (`ADMIN_MASTER`) | `obterMetricasMasterPlataforma` | `empresas`, `cobrancas`, `planos_assinatura` | Checagem de role `ADMIN_MASTER` em `usuarios_perfis` | `plataforma-admin-suporte.test.ts` |
-| `/plataforma/suporte`| Autenticado (`SUPORTE`) | `iniciarSessaoSuporte`, `consultarAuditada` | `empresas`, `sessoes_suporte`, `logs_auditoria` | Fail-closed: exige ticket aberto; bloqueia movimentação financeira | `plataforma-admin-suporte.test.ts`, `multi-tenant.test.ts` |
-| `/api/public/webhooks/asaas` | Público (Header Secret) | Webhook Router POST | `webhook_eventos`, `cobrancas`, `movimentos_saldo`, `fundings`, `pagamentos` | Autenticação via header `asaas-access-token`, idempotência por chave única | `webhook-idempotencia.test.ts`, `api/routes.test.ts` |
+| Rota / Endpoint              | Acesso / Papéis                      | Server Function / Lógica                         | Tabelas Supabase Acessadas                                                   | Políticas RLS / Segurança                                                  | Teste de Cobertura                                         |
+| :--------------------------- | :----------------------------------- | :----------------------------------------------- | :--------------------------------------------------------------------------- | :------------------------------------------------------------------------- | :--------------------------------------------------------- |
+| `/`                          | Público                              | Renderização SSR estática                        | Nenhuma                                                                      | Nenhuma                                                                    | N/A                                                        |
+| `/login`                     | Público                              | Autenticação Supabase Auth                       | `auth.users`, `usuarios_perfis`                                              | Pública / Sanitização de credenciais                                       | `cadastros.test.ts`                                        |
+| `/ponto/$token`              | Público (Token)                      | `obterEventoPonto`, `registrarPontoPublico`      | `eventos`, `pontos`, `colaboradores`                                         | Validação de token (expiração 12h), GPS Haversine, Rate-limit por IP       | `ponto.$token.test.ts`                                     |
+| `/painel`                    | Autenticado (`admin`, `coordenador`) | `obterMetricasOperacionaisPainel`                | `eventos`, `escalas`, `pontos`, `fechamentos`, `pagamentos`                  | RLS estrito por `empresa_id` (`empresa_atual()`)                           | `operacao.test.ts`, `saldo.test.ts`                        |
+| `/eventos`                   | Autenticado (`admin`, `coordenador`) | `listarEventos`, `criarEvento`                   | `eventos`, `clientes`, `escalas`                                             | RLS: `empresa_id = empresa_atual()`                                        | `eventos.test.ts`                                          |
+| `/operacao/$eventoId`        | Autenticado (`admin`, `coordenador`) | `obterOperacaoAoVivo`, `aprovarPonto`            | `eventos`, `escalas`, `pontos`                                               | Auditoria de supervisor, bloqueio de adulteração de tenant                 | `operacao.test.ts`                                         |
+| `/fechamentos`               | Autenticado (`admin`, `financeiro`)  | `calcularFechamentoLote`, `consolidarFechamento` | `fechamentos`, `escalas`, `pagamentos`                                       | RLS: leitura e escrita exclusivas do tenant                                | `financeiro-fechamento.test.ts`                            |
+| `/financeiro`                | Autenticado (`admin`, `financeiro`)  | `obterExtratoTesouraria`, `solicitarFunding`     | `cobrancas`, `movimentos_saldo`, `fundings`                                  | Segregação estrita de saldos (funding vs receita própria)                  | `tesouraria.test.ts`, `saldo.test.ts`                      |
+| `/freelancers`               | Autenticado (`admin`, `coordenador`) | `listarFreelancers`, `cadastrarColaborador`      | `colaboradores`, `contas_bancarias_pix`                                      | Validação de CPF/Chave Pix (Frela vs CLT)                                  | `cadastros.test.ts`, `folha-clt.test.ts`                   |
+| `/configuracoes`             | Autenticado (`admin`)                | `atualizarConfiguracaoEmpresa`, `gerenciarPlano` | `empresas`, `planos_assinatura`, `taxas_plataforma`                          | Verificação de role `admin` da empresa                                     | `configuracoes-plano.test.ts`                              |
+| `/plataforma/admin`          | Autenticado (`ADMIN_MASTER`)         | `obterMetricasMasterPlataforma`                  | `empresas`, `cobrancas`, `planos_assinatura`                                 | Checagem de role `ADMIN_MASTER` em `usuarios_perfis`                       | `plataforma-admin-suporte.test.ts`                         |
+| `/plataforma/suporte`        | Autenticado (`SUPORTE`)              | `iniciarSessaoSuporte`, `consultarAuditada`      | `empresas`, `sessoes_suporte`, `logs_auditoria`                              | Fail-closed: exige ticket aberto; bloqueia movimentação financeira         | `plataforma-admin-suporte.test.ts`, `multi-tenant.test.ts` |
+| `/api/public/webhooks/asaas` | Público (Header Secret)              | Webhook Router POST                              | `webhook_eventos`, `cobrancas`, `movimentos_saldo`, `fundings`, `pagamentos` | Autenticação via header `asaas-access-token`, idempotência por chave única | `webhook-idempotencia.test.ts`, `api/routes.test.ts`       |
 
 ---
 
 ## 3. Segurança e Auditoria de Isolamento Multi-Tenant
 
 ### 3.1. Isolamento Estrito de Dados (Org A vs Org B)
+
 - **Princípio Fundamental:** Cada consulta ao banco aplica o predicado `empresa_id = public.empresa_atual()`.
 - **Proteção contra IDOR (Insecure Direct Object Reference):** Se a Organização A tentar consultar diretamente um recurso (evento, colaborador, pagamento) da Organização B informando o seu UUID, a consulta resulta em vazio (`null` / 0 registros), pois a chave de tenant é imposta na camada de banco de dados via RLS.
 - **Evidência de Teste:** O arquivo `src/lib/multi-tenant.test.ts` valida programmaticamente o isolamento total entre dois tenants sintéticos (`empresa-alpha-111` e `empresa-beta-222`), comprovando que dados e IDs da Org B são inalcançáveis pelo contexto da Org A.
 
 ### 3.2. Perfis Privilegiados e Acesso Suporte (Fail-Closed)
+
 - **Operador de Suporte:** Não possui acesso irrestrito. Para visualizar dados de um cliente, deve abrir uma sessão de suporte auditada vinculada a um chamado (`sessao_suporte`).
 - **Bloqueio Financeiro de Suporte:** Endpoints de movimentação de dinheiro (disparo de Pix, estorno de saldo, aprovação de lote) falham fechados quando requisitados por usuários com papel `suporte`.
 - **Master Admin:** Visão consolidada de faturamento de planos SaaS e saúde do sistema, sem misturar fundos de clientes com a conta de taxas da plataforma.
@@ -68,11 +71,13 @@
 ## 4. Auditoria Financeira e Idempotência de Pagamentos
 
 ### 4.1. Ambiente Asaas Sandbox
+
 - Todas as transações Pix são processadas contra a API Sandbox do Asaas (`https://sandbox.asaas.com/api/v3`).
 - **Nenhum centavo real é transferido em ambiente de homologação ou teste.**
 - Variável `ASAAS_ENVIRONMENT=sandbox` é aplicada por padrão.
 
 ### 4.2. Ingestão de Webhooks e Prevenção de Duplo Crédito
+
 - A rota `/api/public/webhooks/asaas` gera uma chave determinística:
   `asaas-webhook:{evento}:{paymentId}:{transferId}:{valor}`
 - O banco registra o evento na tabela `webhook_eventos`.
@@ -87,6 +92,7 @@
 ## 5. Auditoria de Antifraude do Ponto Eletrônico e LGPD
 
 ### 5.1. Mecanismos de Proteção
+
 1. **QR Code Dinâmico:** Expira automaticamente após o evento (tolerância máxima de 12 horas).
 2. **Geolocalização Haversine:** A coordenada GPS informada pelo navegador móvel do colaborador é validada contra a latitude/longitude do evento com raio de tolerância configurável (300m a 1000m).
 3. **Máquina de Estados de Marcações:** A ordem cronológica `Entrada` ➔ `Início de Intervalo` ➔ `Fim de Intervalo` ➔ `Saída` é estritamente exigida. Batidas repetidas de entrada são rejeitadas.

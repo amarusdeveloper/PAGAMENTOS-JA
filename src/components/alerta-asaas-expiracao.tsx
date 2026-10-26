@@ -32,21 +32,26 @@ export function AlertaAsaasExpiracao() {
       ? "https://www.asaas.com/configuracoes/integracoes"
       : "https://sandbox.asaas.com/configuracoes/integracoes";
 
-  let containerClass = "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200";
+  let containerClass =
+    "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-200";
   let badgeClass = "bg-sky-100 text-sky-800 border-sky-300 dark:bg-sky-900/60 dark:text-sky-300";
   let Icone = CheckCircle2;
 
   if (expirada) {
-    containerClass = "border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200";
+    containerClass =
+      "border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200";
     badgeClass = "bg-red-100 text-red-800 border-red-300 dark:bg-red-900/60 dark:text-red-300";
     Icone = AlertCircle;
   } else if (alertaUrgente) {
-    containerClass = "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200";
+    containerClass =
+      "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-200";
     badgeClass = "bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-900/60 dark:text-rose-300";
     Icone = AlertTriangle;
   } else if (alertaAtencao) {
-    containerClass = "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200";
-    badgeClass = "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/60 dark:text-amber-300";
+    containerClass =
+      "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200";
+    badgeClass =
+      "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/60 dark:text-amber-300";
     Icone = AlertTriangle;
   }
 
@@ -62,7 +67,9 @@ export function AlertaAsaasExpiracao() {
               <h3 className="font-semibold text-base leading-tight">
                 Monitoramento da API Asaas (Pix & Cobranças)
               </h3>
-              <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${badgeClass}`}>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${badgeClass}`}
+              >
                 <Icone className="h-3 w-3" />
                 {expirada
                   ? "Chave Expirada"
@@ -80,12 +87,14 @@ export function AlertaAsaasExpiracao() {
             <p className="mt-1.5 text-sm opacity-90 leading-relaxed">
               {expirada ? (
                 <strong className="font-semibold text-red-700 dark:text-red-400">
-                  ATENÇÃO: A chave de API do Asaas expirou em 31/12 às 00:00! Os envios de Pix aos freelancers e emissão de cobranças foram paralisados até a inserção da nova chave.
+                  ATENÇÃO: A chave de API do Asaas expirou em 31/12 às 00:00! Os envios de Pix aos
+                  freelancers e emissão de cobranças foram paralisados até a inserção da nova chave.
                 </strong>
               ) : (
                 <>
-                  Esta chave de produção expira impreterivelmente em{" "}
-                  <strong>31/12 às 00:00</strong>. Lembre-se de gerar uma nova chave no painel do Asaas antes do prazo para não interromper a operação financeira.
+                  Esta chave de produção expira impreterivelmente em <strong>31/12 às 00:00</strong>
+                  . Lembre-se de gerar uma nova chave no painel do Asaas antes do prazo para não
+                  interromper a operação financeira.
                 </>
               )}
             </p>

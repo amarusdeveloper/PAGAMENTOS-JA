@@ -53,32 +53,36 @@ Este documento detalha as decisões de engenharia, os fluxos de dados, os padrõ
 
 O projeto adota uma arquitetura híbrida intencional entre **PostgreSQL gerenciado (Supabase)** e **Drizzle ORM**:
 
-| Dimensão | Supabase (PostgreSQL 15+) | Drizzle ORM |
-| :--- | :--- | :--- |
-| **Papel Principal** | **Runtime Engine & Fonte da Verdade** | **Schema as Code & Type-Safety** |
-| **Localização** | `supabase/migrations/`, `supabase/schema_completo.sql` | `drizzle/schema.ts`, `drizzle/migrations/` |
-| **Segurança e RLS** | Executa políticas de Row Level Security (`empresa_atual()`), isolamento multi-tenant e controle de privilégios. | Não executa RLS; reflete colunas de segurança e auditoria no schema tipado. |
-| **Autenticação** | Fornece infraestrutura GoTrue (`auth.users`, tokens JWT e sessões de usuário). | Não gerencia auth; referencia chaves estrangeiras (`auth.users.id`). |
-| **Camada de Aplicação** | Executa Stored Procedures ACID, triggers de atualização e regras de consistência transacional. | Oferece interfaces TypeScript estritas consumidas pelas Server Functions e rotas TanStack. |
-| **Migrações e Deploy** | Migrações aplicadas no cluster de produção via Supabase CLI / pipeline de banco. | Migrações locais versionadas para testes, documentação de esquema e DDL declarativo. |
+| Dimensão                | Supabase (PostgreSQL 15+)                                                                                       | Drizzle ORM                                                                                |
+| :---------------------- | :-------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------- |
+| **Papel Principal**     | **Runtime Engine & Fonte da Verdade**                                                                           | **Schema as Code & Type-Safety**                                                           |
+| **Localização**         | `supabase/migrations/`, `supabase/schema_completo.sql`                                                          | `drizzle/schema.ts`, `drizzle/migrations/`                                                 |
+| **Segurança e RLS**     | Executa políticas de Row Level Security (`empresa_atual()`), isolamento multi-tenant e controle de privilégios. | Não executa RLS; reflete colunas de segurança e auditoria no schema tipado.                |
+| **Autenticação**        | Fornece infraestrutura GoTrue (`auth.users`, tokens JWT e sessões de usuário).                                  | Não gerencia auth; referencia chaves estrangeiras (`auth.users.id`).                       |
+| **Camada de Aplicação** | Executa Stored Procedures ACID, triggers de atualização e regras de consistência transacional.                  | Oferece interfaces TypeScript estritas consumidas pelas Server Functions e rotas TanStack. |
+| **Migrações e Deploy**  | Migrações aplicadas no cluster de produção via Supabase CLI / pipeline de banco.                                | Migrações locais versionadas para testes, documentação de esquema e DDL declarativo.       |
 
 ---
 
 ## 3. Segurança Multi-Tenant e Modelo de Isolamento
 
 ### 3.1. Princípio do Isolamento por Tenant
+
 Toda tabela que armazena dados de negócio (`eventos`, `escalas`, `pontos`, `fechamentos`, `cobrancas`, `pagamentos`, `movimentos_saldo`) possui a coluna `empresa_id uuid NOT NULL`.
 
 A política RLS garante que o usuário autenticado só possa consultar ou modificar linhas cujo `empresa_id` corresponda ao retorno de `public.empresa_atual()`:
+
 ```sql
 CREATE POLICY "tenant_isolation_select" ON public.eventos
   FOR SELECT USING (empresa_id = public.empresa_atual());
 ```
 
 ### 3.2. Prevenção de Acesso Cruzado e IDOR
+
 Mesmo que um operador tente forjar o UUID de um evento ou colaborador pertencente a outro tenant em uma requisição, a consulta de banco filtra silenciosamente o registro por `empresa_id`, retornando resultado nulo ou erro de não encontrado.
 
 ### 3.3. Sessões de Suporte Auditadas (Fail-Closed)
+
 - Operadores com perfil `suporte` não possuem acesso irrestrito aos dados dos clientes.
 - O acesso de leitura a uma empresa específica exige uma sessão ativa registrada na tabela `sessoes_suporte`, vinculada ao ticket do cliente e com expiração temporal.
 - Qualquer endpoint financeiro (movimentação de fundos, emissão de Pix) bloqueia chamadas vindas de perfil `suporte`.

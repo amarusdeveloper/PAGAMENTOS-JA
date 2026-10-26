@@ -36,15 +36,13 @@ function createSupabaseClient() {
     import.meta.env["VITE_SUPABASE_URL"] ||
     process.env["VITE_SUPABASE_URL"] ||
     process.env["SUPABASE_URL"];
-  const SUPABASE_URL =
-    rawUrl || "https://rutmjtmirwcyoroyjqdy.supabase.co";
+  const SUPABASE_URL = rawUrl || "https://rutmjtmirwcyoroyjqdy.supabase.co";
 
   const rawKey =
     import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
     process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
     process.env["SUPABASE_PUBLISHABLE_KEY"];
-  const SUPABASE_PUBLISHABLE_KEY =
-    rawKey || "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
+  const SUPABASE_PUBLISHABLE_KEY = rawKey || "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
 
   if (!import.meta.env["VITE_SUPABASE_URL"] && !process.env["SUPABASE_URL"]) {
     console.warn(

@@ -110,9 +110,7 @@ export const obterStatusApiAsaas = createServerFn({ method: "GET" })
     const diasRestantes = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
     // Exibir máscara segura do token para validação sem expor a chave inteira
-    const chaveMascarada = configurada
-      ? `${chave.slice(0, 15)}...${chave.slice(-6)}`
-      : null;
+    const chaveMascarada = configurada ? `${chave.slice(0, 15)}...${chave.slice(-6)}` : null;
 
     return {
       configurada,

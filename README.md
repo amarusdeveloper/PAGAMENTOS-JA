@@ -19,28 +19,29 @@ Agências de casting, produtoras de eventos e empresas de terceirização enfren
 
 1. **Fraudes em ponto de campo:** colaboradores que registram entrada sem estar no local ou compartilham links.
 2. **Fechamento manual caótico:** conferência de horas, intervalos e diárias em planilhas manuais sujeitas a falhas.
-3. **Confusão patrimonial e fiscal:** mistura entre os adiantamentos recebidos dos clientes contratantes (*funding* em custódia de diárias) e a margem de receita própria da agência.
+3. **Confusão patrimonial e fiscal:** mistura entre os adiantamentos recebidos dos clientes contratantes (_funding_ em custódia de diárias) e a margem de receita própria da agência.
 4. **Fricção bancária:** repasses individuais manuais via Pix para dezenas de profissionais ao término de cada escala.
 
 A plataforma **Já** atua em um fluxo operacional unificado:
+
 - **Ponto Digital em Campo:** check-in/out via celular do colaborador com leitura de QR Code dinâmico (expiração em 12h), geofencing por GPS (cálculo Haversine) e registro de selfie para conferência humana pelo supervisor.
 - **Fechamento Operacional:** apuração de horas trabalhadas, horas extras e valor líquido com conferência em tela única e aprovação pelo coordenador.
-- **Tesouraria com Segregação de Saldos:** separação contábil clara e isolada entre saldo real bancário, saldo aportado por clientes em custódia (*funding*) e receita de agência.
+- **Tesouraria com Segregação de Saldos:** separação contábil clara e isolada entre saldo real bancário, saldo aportado por clientes em custódia (_funding_) e receita de agência.
 - **Repasses Pix e Webhooks:** integração com gateway bancário (Asaas em ambiente sandbox) com idempotência transacional contra duplicidade de créditos.
 
 ---
 
 ## 🚀 Arquitetura e Stack Tecnológica
 
-| Camada | Tecnologia | Papel no Projeto |
-| :--- | :--- | :--- |
-| **Full-Stack Framework** | [TanStack Start](https://tanstack.com/start) + [React 19](https://react.dev/) | SSR performante, type-safety de ponta a ponta e Server Functions executadas no servidor. |
-| **Linguagem** | [TypeScript](https://www.typescriptlang.org/) | Tipagem estrita com modo estrito de propriedades (`exactOptionalPropertyTypes`). |
-| **Banco de Dados & Auth** | [PostgreSQL (Supabase)](https://supabase.com/) | Runtime de produção, Row Level Security (RLS) multi-tenant e autenticação GoTrue. |
-| **Schema as Code** | [Drizzle ORM](https://orm.drizzle.team/) | Definição declarativa de schemas (`drizzle/schema.ts`), migrações e tipagem de domínio. |
-| **Estilização & UI** | [Tailwind CSS 4](https://tailwindcss.com/) + [Radix UI](https://www.radix-ui.com/) | Design system sóbrio e responsivo construído para alta densidade de informação operacional. |
-| **Gateway de Pagamento** | [Asaas API v3 (Sandbox)](https://docs.asaas.com/) | Cobranças Pix e liquidações testadas em ambiente controlado de homologação. |
-| **Testes Automatizados** | [Vitest](https://vitest.dev/) | 22 suítes e 99 testes cobrindo multi-tenancy, idempotência, tesouraria e regras de ponto. |
+| Camada                    | Tecnologia                                                                         | Papel no Projeto                                                                            |
+| :------------------------ | :--------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------ |
+| **Full-Stack Framework**  | [TanStack Start](https://tanstack.com/start) + [React 19](https://react.dev/)      | SSR performante, type-safety de ponta a ponta e Server Functions executadas no servidor.    |
+| **Linguagem**             | [TypeScript](https://www.typescriptlang.org/)                                      | Tipagem estrita com modo estrito de propriedades (`exactOptionalPropertyTypes`).            |
+| **Banco de Dados & Auth** | [PostgreSQL (Supabase)](https://supabase.com/)                                     | Runtime de produção, Row Level Security (RLS) multi-tenant e autenticação GoTrue.           |
+| **Schema as Code**        | [Drizzle ORM](https://orm.drizzle.team/)                                           | Definição declarativa de schemas (`drizzle/schema.ts`), migrações e tipagem de domínio.     |
+| **Estilização & UI**      | [Tailwind CSS 4](https://tailwindcss.com/) + [Radix UI](https://www.radix-ui.com/) | Design system sóbrio e responsivo construído para alta densidade de informação operacional. |
+| **Gateway de Pagamento**  | [Asaas API v3 (Sandbox)](https://docs.asaas.com/)                                  | Cobranças Pix e liquidações testadas em ambiente controlado de homologação.                 |
+| **Testes Automatizados**  | [Vitest](https://vitest.dev/)                                                      | 22 suítes e 99 testes cobrindo multi-tenancy, idempotência, tesouraria e regras de ponto.   |
 
 ---
 
@@ -57,58 +58,65 @@ O projeto divide intencionalmente as responsabilidades de banco de dados:
 
 Para máxima transparência técnica, o estado de cada capacidade do sistema é catalogado abaixo (conforme detalhado em [`roadmap.md`](roadmap.md)):
 
-| Módulo / Funcionalidade | Status | Detalhes |
-| :--- | :---: | :--- |
-| **Isolamento Multi-Tenant Estrito** | ✅ Implementado | RLS em todas as tabelas de negócio; comprovado por testes automatizados de cross-tenant. |
-| **Ponto Mobile Antifraude** | ✅ Implementado | QR Code com expiração de 12h, tolerância GPS Haversine e selfie para auditoria do supervisor. |
-| **Máquina de Estados de Marcações** | ✅ Implementado | Sequência estrita `Entrada ➔ Início Intervalo ➔ Fim Intervalo ➔ Saída`; rejeição de duplicatas. |
-| **Segregação de Saldos em Tesouraria** | ✅ Implementado | Separação contábil entre adiantamento de clientes (*funding* em custódia) e receita própria. |
-| **Faturamento SaaS V2** | ✅ Implementado | Planos por participações deduplicadas com precificação imutável congelada por ciclo. |
-| **Ingestão Idempotente de Webhooks** | ✅ Implementado | Tabela `webhook_eventos` com hash determinístico e proteção contra duplo crédito. |
-| **Perfis e Acesso Suporte Auditado** | ✅ Implementado | RBAC (`admin`, `coordenador`, `suporte`, `master`); suporte falha fechado sem ticket ativo. |
-| **Repasses Pix em Sandbox** | ✅ Implementado | Fluxo de disparo de Pix homologado e simulado em ambiente Asaas Sandbox. |
-| **Validação Cadastral Frela vs CLT** | ✅ Implementado | Validações fiscais de CPF, PIS, chave Pix e separação de rotinas de cálculo. |
-| **Suíte de Testes Automatizados** | ✅ Implementado | 22 arquivos de teste e 99 testes automatizados com 100% de aprovação no Vitest. |
-| **Pipeline de Integração Contínua (CI)** | ✅ Implementado | GitHub Actions com lint, typecheck, varredura de segredos e execução de testes. |
-| **Containerização Docker** | ✅ Implementado | `Dockerfile` multi-stage com usuário não-root e `docker-compose.yml` para ambiente local. |
-| **Validação em Ambiente Publicado** | 🔄 Em Andamento | Testes integrados com preview final e homologação de sessão de suporte. |
-| **Rotina Automática de Expurgo LGPD** | 🔄 Em Andamento | Cron job para limpeza física de fotos de selfie após expiração do período de retenção. |
-| **Split Nativo de Pagamentos** | 📋 Planejado | Divisão automática de recebíveis entre agência e múltiplos prestadores no gateway. |
-| **Transição de Gateway (Mercado Pago)** | 📋 Planejado | Homologação de conta agregada com checkout transparente para novas agências. |
-| **Rastreamento em 30/60/90 Dias** | 📋 Planejado | Painel estendido de projeção de fluxo de caixa e provisionamento de diárias a longo prazo. |
+| Módulo / Funcionalidade                  |     Status      | Detalhes                                                                                        |
+| :--------------------------------------- | :-------------: | :---------------------------------------------------------------------------------------------- |
+| **Isolamento Multi-Tenant Estrito**      | ✅ Implementado | RLS em todas as tabelas de negócio; comprovado por testes automatizados de cross-tenant.        |
+| **Ponto Mobile Antifraude**              | ✅ Implementado | QR Code com expiração de 12h, tolerância GPS Haversine e selfie para auditoria do supervisor.   |
+| **Máquina de Estados de Marcações**      | ✅ Implementado | Sequência estrita `Entrada ➔ Início Intervalo ➔ Fim Intervalo ➔ Saída`; rejeição de duplicatas. |
+| **Segregação de Saldos em Tesouraria**   | ✅ Implementado | Separação contábil entre adiantamento de clientes (_funding_ em custódia) e receita própria.    |
+| **Faturamento SaaS V2**                  | ✅ Implementado | Planos por participações deduplicadas com precificação imutável congelada por ciclo.            |
+| **Ingestão Idempotente de Webhooks**     | ✅ Implementado | Tabela `webhook_eventos` com hash determinístico e proteção contra duplo crédito.               |
+| **Perfis e Acesso Suporte Auditado**     | ✅ Implementado | RBAC (`admin`, `coordenador`, `suporte`, `master`); suporte falha fechado sem ticket ativo.     |
+| **Repasses Pix em Sandbox**              | ✅ Implementado | Fluxo de disparo de Pix homologado e simulado em ambiente Asaas Sandbox.                        |
+| **Validação Cadastral Frela vs CLT**     | ✅ Implementado | Validações fiscais de CPF, PIS, chave Pix e separação de rotinas de cálculo.                    |
+| **Suíte de Testes Automatizados**        | ✅ Implementado | 22 arquivos de teste e 99 testes automatizados com 100% de aprovação no Vitest.                 |
+| **Pipeline de Integração Contínua (CI)** | ✅ Implementado | GitHub Actions com lint, typecheck, varredura de segredos e execução de testes.                 |
+| **Containerização Docker**               | ✅ Implementado | `Dockerfile` multi-stage com usuário não-root e `docker-compose.yml` para ambiente local.       |
+| **Validação em Ambiente Publicado**      | 🔄 Em Andamento | Testes integrados com preview final e homologação de sessão de suporte.                         |
+| **Rotina Automática de Expurgo LGPD**    | 🔄 Em Andamento | Cron job para limpeza física de fotos de selfie após expiração do período de retenção.          |
+| **Split Nativo de Pagamentos**           |  📋 Planejado   | Divisão automática de recebíveis entre agência e múltiplos prestadores no gateway.              |
+| **Transição de Gateway (Mercado Pago)**  |  📋 Planejado   | Homologação de conta agregada com checkout transparente para novas agências.                    |
+| **Rastreamento em 30/60/90 Dias**        |  📋 Planejado   | Painel estendido de projeção de fluxo de caixa e provisionamento de diárias a longo prazo.      |
 
 ---
 
 ## 🛠️ Como Executar Localmente
 
 ### Pré-requisitos
+
 - **Node.js 22+**
 - **npm** (gerenciador oficial padronizado do projeto)
 
 ### 1. Clonar o Repositório
+
 ```bash
 git clone https://github.com/seu-usuario/PAGAMENTOS-JA.git
 cd PAGAMENTOS-JA
 ```
 
 ### 2. Instalar Dependências
+
 ```bash
 npm install
 ```
 
 ### 3. Configurar Variáveis de Ambiente
+
 Copie o arquivo de exemplo e preencha com suas credenciais de sandbox/desenvolvimento:
+
 ```bash
 cp .env.example .env
 ```
 
 ### 4. Executar em Modo de Desenvolvimento
+
 ```bash
 npm run dev
 # Acesse no navegador: http://localhost:3000
 ```
 
 ### 5. Executar com Docker
+
 ```bash
 docker compose up --build
 ```
