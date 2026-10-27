@@ -368,7 +368,8 @@ function DetalheEvento() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["evento", eventoId] });
       queryClient.invalidateQueries({ queryKey: ["painel"] });
-      toast.success("Novo QR Code gerado. O código anterior deixou de funcionar.");
+      queryClient.refetchQueries({ queryKey: ["evento", eventoId] });
+      toast.success("Novo QR Code gerado e ativado por 12 horas.");
     },
     onError: (error: Error) => toast.error(error.message),
   });

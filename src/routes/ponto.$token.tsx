@@ -293,12 +293,17 @@ export function PaginaPonto() {
         </div>
         <h1 className="text-xl font-bold text-foreground">QR Code Inválido ou Expirado</h1>
         <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
-          Este código de ponto não está mais ativo ou ultrapassou a janela máxima de 12 horas após o
-          encerramento do evento.
+          {contexto.error?.message ||
+            "Este código de ponto não está mais ativo ou ultrapassou a janela máxima de 12 horas."}
         </p>
         <p className="mt-4 text-xs text-muted-foreground">
-          Solicite ao supervisor ou coordenação um QR Code atualizado no painel do evento.
+          Solicite ao supervisor do evento para abrir o painel e clicar em &quot;Trocar QR&quot;
+          para renovar o código ativo.
         </p>
+        <Button variant="outline" size="sm" className="mt-6" onClick={() => contexto.refetch()}>
+          <RefreshCw className="size-3.5 mr-1.5" />
+          Tentar novamente
+        </Button>
       </main>
     );
   }

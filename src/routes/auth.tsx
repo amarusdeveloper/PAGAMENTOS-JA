@@ -1,19 +1,24 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  KeyRound,
+  Loader2,
+  LogIn,
+  Mail,
+  ShieldCheck,
+  UserPlus,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
-import { autoConfirmarEmail, cadastrarOuRedefinirUsuario } from "@/lib/auth.functions";
-import {
-  carregarDadosAcesso,
-  extrairTokenOuLink,
-  resolverDestinoAcesso,
-} from "@/lib/auth-navigation";
+import { cadastrarOuRedefinirUsuario } from "@/lib/auth.functions";
+import { carregarDadosAcesso, resolverDestinoAcesso } from "@/lib/auth-navigation";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -51,18 +56,17 @@ export const Route = createFileRoute("/auth")({
   component: Auth,
 });
 
+type ModoAuth = "login" | "cadastro" | "recuperar";
+
 function Auth() {
   const navigate = useNavigate();
-  const autoConfirmar = useServerFn(autoConfirmarEmail);
   const cadastrarOuRedefinir = useServerFn(cadastrarOuRedefinirUsuario);
+  const [modo, setModo] = useState<ModoAuth>("login");
   const [carregando, setCarregando] = useState(false);
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [nome, setNome] = useState("");
-  const [aguardandoConfirmacao, setAguardandoConfirmacao] = useState(false);
-
-  const [codigoOtp, setCodigoOtp] = useState("");
-  const [verificandoOtp, setVerificandoOtp] = useState(false);
+  const [recuperacaoEnviada, setRecuperacaoEnviada] = useState(false);
 
   const redirecionarParaDestino = useCallback(
     async (user: { id: string }) => {
@@ -92,7 +96,6 @@ function Auth() {
     [navigate],
   );
 
-  // Escuta confirmação da autenticação e trata links de confirmação com hash ou code
   useEffect(() => {
     // 1. Trata código PKCE na query string (?code=...)
     const params = new URLSearchParams(window.location.search);
@@ -101,7 +104,7 @@ function Auth() {
       supabase.auth.exchangeCodeForSession(code).then(({ data, error }) => {
         if (!error && data?.user) {
           toast.success("Autenticado com sucesso!");
-          redirecionarParaDestino(data.user);
+          void redirecionarParaDestino(data.user);
         }
       });
     }
@@ -121,7 +124,7 @@ function Auth() {
           .then(({ data, error }) => {
             if (!error && data?.user) {
               toast.success("Autenticado com sucesso!");
-              redirecionarParaDestino(data.user);
+              void redirecionarParaDestino(data.user);
             }
           });
       }
@@ -142,120 +145,63 @@ function Auth() {
       }
     });
 
-    return () => authListener.subscription.unsubscribe();
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
   }, [redirecionarParaDestino]);
 
-  async function entrar(e: React.FormEvent) {
+  // Handler: Fazer Login com Email e Senha
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setCarregando(true);
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password: senha });
-    if (error) {
-      // Se acusar e-mail não confirmado, auto-confirma no backend e tenta o login direto
-      if (error.message.toLowerCase().includes("email not confirmed")) {
-        try {
-          await autoConfirmar({ data: { email } });
-          const { data: retryData, error: retryErr } = await supabase.auth.signInWithPassword({
-            email,
-            password: senha,
-          });
-          if (!retryErr && retryData?.user) {
-            setCarregando(false);
-            toast.success("Autenticado com sucesso!");
-            await redirecionarParaDestino(retryData.user);
-            return;
-          }
-        } catch (err) {
-          console.warn("Auto-confirmação no login:", err);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: senha,
+      });
+
+      if (error) {
+        setCarregando(false);
+        if (
+          error.message.includes("Invalid login") ||
+          error.message.includes("invalid_credentials")
+        ) {
+          toast.error("E-mail ou senha incorretos.");
+        } else {
+          toast.error(error.message);
         }
-      }
-
-      setCarregando(false);
-      toast.error(
-        error.message === "Invalid login credentials"
-          ? "E-mail ou senha incorretos."
-          : error.message,
-      );
-      return;
-    }
-    setCarregando(false);
-    if (data.user) {
-      toast.success("Autenticado com sucesso!");
-      await redirecionarParaDestino(data.user);
-    }
-  }
-
-  async function enviarLinkMagico(e: React.FormEvent) {
-    e.preventDefault();
-    setCarregando(true);
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: `${window.location.origin}/auth` },
-    });
-    setCarregando(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    toast.success("E-mail de acesso enviado! Verifique sua caixa de entrada.");
-    setAguardandoConfirmacao(true);
-  }
-
-  async function validarCodigoOtp(e: React.FormEvent) {
-    e.preventDefault();
-    setVerificandoOtp(true);
-    const extracao = extrairTokenOuLink(codigoOtp);
-
-    // Caso o usuário cole link com tokens de hash
-    if (extracao.tipo === "tokens_hash" && extracao.accessToken && extracao.refreshToken) {
-      try {
-        const { error: sessErr } = await supabase.auth.setSession({
-          access_token: extracao.accessToken,
-          refresh_token: extracao.refreshToken,
-        });
-        if (sessErr) throw sessErr;
-        toast.success("Autenticado com sucesso!");
-        const { data: userData } = await supabase.auth.getUser();
-        if (userData.user) await redirecionarParaDestino(userData.user);
         return;
-      } catch (err) {
-        console.error("Falha ao aplicar tokens:", err);
       }
-    }
 
-    // Validação de token ou código OTP
-    const { data: otpData, error } = await supabase.auth.verifyOtp({
-      email,
-      token: extracao.token || codigoOtp.trim(),
-      type: extracao.tokenType || "email",
-    });
-    setVerificandoOtp(false);
-    if (error) {
-      toast.error(
-        error.message.includes("Token has expired") || error.message.includes("invalid")
-          ? "Código inválido ou expirado. Você também pode clicar diretamente no botão 'Log In' do e-mail."
-          : error.message,
-      );
-      return;
-    }
-    toast.success("Autenticado com sucesso!");
-    if (otpData.user) {
-      await redirecionarParaDestino(otpData.user);
-    } else {
-      const { data: userData } = await supabase.auth.getUser();
-      if (userData.user) await redirecionarParaDestino(userData.user);
+      if (data?.user) {
+        toast.success("Login realizado com sucesso!");
+        await redirecionarParaDestino(data.user);
+      }
+    } catch (err) {
+      setCarregando(false);
+      toast.error(err instanceof Error ? err.message : "Erro ao efetuar login.");
     }
   }
 
-  async function cadastrar(e: React.FormEvent) {
+  // Handler: Criar Nova Conta
+  async function handleCadastro(e: React.FormEvent) {
     e.preventDefault();
-    setCarregando(true);
+    if (!nome.trim()) {
+      toast.error("Por favor, informe seu nome.");
+      return;
+    }
+    if (senha.length < 6) {
+      toast.error("A senha deve ter no mínimo 6 caracteres.");
+      return;
+    }
 
+    setCarregando(true);
     try {
       const res = await cadastrarOuRedefinir({
         data: {
-          email,
+          email: email.trim(),
           password: senha,
-          nome,
+          nome: nome.trim(),
         },
       });
 
@@ -265,20 +211,21 @@ function Auth() {
         return;
       }
 
-      // Login imediato com o e-mail e a senha cadastrados
+      // Autentica imediatamente
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password: senha,
       });
 
       setCarregando(false);
       if (error) {
-        toast.error("Erro ao autenticar: " + error.message);
+        toast.error("Conta criada! Por favor, faça login com sua senha.");
+        setModo("login");
         return;
       }
 
-      if (data.user) {
-        toast.success("Conta criada e autenticada com sucesso!");
+      if (data?.user) {
+        toast.success("Conta criada com sucesso! Bem-vindo ao Já.");
         await redirecionarParaDestino(data.user);
       }
     } catch (err) {
@@ -287,247 +234,343 @@ function Auth() {
     }
   }
 
-  async function comGoogle() {
+  // Handler: Esqueci Minha Senha (Recuperação)
+  async function handleRecuperarSenha(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) {
+      toast.error("Por favor, digite seu e-mail.");
+      return;
+    }
+
     setCarregando(true);
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: `${window.location.origin}/auth`,
-      },
-    });
-    if (error) {
+      });
+
       setCarregando(false);
-      toast.error("Não foi possível entrar com o Google.");
+      if (error) {
+        toast.error(error.message || "Erro ao solicitar recuperação de senha.");
+        return;
+      }
+
+      setRecuperacaoEnviada(true);
+      toast.success("E-mail de recuperação enviado! Verifique sua caixa de entrada.");
+    } catch (err) {
+      setCarregando(false);
+      toast.error("Erro inesperado ao solicitar recuperação.");
     }
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-between bg-muted/30 px-4 py-8">
-      <div className="w-full max-w-sm my-auto">
-        <div className="mb-6 text-center space-y-1">
-          <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold text-primary mb-2">
-            <span>SaaS por Swali</span>
+    <div className="flex min-h-[100dvh] flex-col items-center justify-between bg-slate-50 dark:bg-slate-950 px-4 py-6 sm:px-6 sm:py-10">
+      <div className="w-full max-w-md my-auto">
+        {/* Cabeçalho da Marca */}
+        <div className="mb-6 text-center space-y-1.5">
+          <div className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/50 dark:text-blue-300">
+            <ShieldCheck className="size-3.5 text-blue-600" />
+            <span>SaaS Corporativo por Swali</span>
           </div>
-          <p className="text-3xl font-black tracking-tight text-foreground">Já</p>
-          <p className="text-xs font-medium text-muted-foreground">
-            Gestão de Equipes e Pagamentos
+          <h1 className="text-3xl font-black tracking-tight text-slate-900 dark:text-white">Já</h1>
+          <p className="text-xs sm:text-sm font-medium text-slate-500 dark:text-slate-400">
+            Gestão de Equipes, Ponto e Pagamentos
           </p>
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-5 shadow-sm space-y-4">
-          {aguardandoConfirmacao ? (
-            <div className="space-y-4 text-center">
+        {/* Card Principal */}
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 sm:p-7 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          {/* 1. MODO: FAZER LOGIN */}
+          {modo === "login" && (
+            <div className="space-y-5">
               <div>
-                <p className="text-base font-semibold">E-mail de Acesso Enviado</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Enviamos o acesso para <strong className="text-foreground">{email}</strong>.
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Fazer login</h2>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Entre com seu e-mail e senha cadastrados.
                 </p>
               </div>
 
-              <div className="rounded-lg bg-primary/10 border border-primary/20 p-3 text-left space-y-2">
-                <p className="text-xs font-semibold text-primary flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
-                  Como acessar agora:
-                </p>
-                <ol className="text-[11px] text-muted-foreground space-y-1 list-decimal list-inside">
-                  <li>
-                    <strong>Opção 1 (Recomendada):</strong> Abra o e-mail e clique no botão{" "}
-                    <strong>&quot;Log In&quot;</strong>. Esta tela detectará na hora e abrirá o
-                    painel.
-                  </li>
-                  <li>
-                    <strong>Opção 2:</strong> Se o e-mail contiver um código numérico de 6 dígitos
-                    ou se preferir copiar o endereço do link do botão, insira abaixo:
-                  </li>
-                </ol>
-              </div>
-
-              <form onSubmit={validarCodigoOtp} className="space-y-3 text-left">
+              <form onSubmit={handleLogin} className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="codigo-otp">Código de 6 dígitos ou link do botão</Label>
+                  <Label htmlFor="email" className="text-xs sm:text-sm font-medium">
+                    E-mail
+                  </Label>
                   <Input
-                    id="codigo-otp"
-                    type="text"
-                    placeholder="Ex: 123456 ou cole o link do e-mail"
+                    id="email"
+                    type="email"
                     required
-                    value={codigoOtp}
-                    onChange={(e) => setCodigoOtp(e.target.value)}
-                    className="text-sm font-mono"
+                    autoComplete="email"
+                    placeholder="seu.email@empresa.com.br"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="h-11 text-base sm:text-sm rounded-xl"
                   />
                 </div>
-                <Button type="submit" className="w-full" disabled={verificandoOtp}>
-                  {verificandoOtp ? "Verificando..." : "Confirmar e Entrar"}
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="senha" className="text-xs sm:text-sm font-medium">
+                      Senha
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRecuperacaoEnviada(false);
+                        setModo("recuperar");
+                      }}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                    >
+                      Esqueci minha senha
+                    </button>
+                  </div>
+                  <Input
+                    id="senha"
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    value={senha}
+                    onChange={(e) => setSenha(e.target.value)}
+                    className="h-11 text-base sm:text-sm rounded-xl"
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={carregando}
+                  className="w-full h-11 sm:h-12 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:text-base shadow-sm transition-all"
+                >
+                  {carregando ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="size-4 animate-spin" />
+                      <span>Entrando...</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2">
+                      <LogIn className="size-4" />
+                      <span>Entrar no sistema</span>
+                    </span>
+                  )}
                 </Button>
               </form>
 
-              <div className="pt-2 border-t border-border flex items-center justify-between text-xs">
-                <button
-                  type="button"
-                  onClick={enviarLinkMagico}
-                  disabled={carregando}
-                  className="text-primary hover:underline"
-                >
-                  Reenviar e-mail
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAguardandoConfirmacao(false);
-                    setCodigoOtp("");
-                  }}
-                  className="text-muted-foreground hover:underline"
-                >
-                  Trocar e-mail / Voltar
-                </button>
+              {/* Alternar para Cadastro */}
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+                <p className="text-xs sm:text-sm text-slate-500">
+                  Ainda não tem uma conta?{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModo("cadastro");
+                    }}
+                    className="font-bold text-blue-600 hover:text-blue-700 hover:underline ml-1"
+                  >
+                    Criar conta
+                  </button>
+                </p>
               </div>
             </div>
-          ) : (
-            <Tabs defaultValue="entrar">
-              <TabsList className="grid w-full grid-cols-3 text-xs">
-                <TabsTrigger value="entrar">Senha</TabsTrigger>
-                <TabsTrigger value="codigo">Código</TabsTrigger>
-                <TabsTrigger value="criar">Criar</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="entrar" className="mt-4">
-                <form onSubmit={entrar} className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="email">E-mail</Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      required
-                      autoComplete="email"
-                      placeholder="seu.email@exemplo.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="senha">Senha</Label>
-                    <Input
-                      id="senha"
-                      type="password"
-                      required
-                      autoComplete="current-password"
-                      value={senha}
-                      onChange={(e) => setSenha(e.target.value)}
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={carregando}>
-                    {carregando ? "Entrando..." : "Entrar"}
-                  </Button>
-                </form>
-              </TabsContent>
-
-              <TabsContent value="codigo" className="mt-4">
-                <form onSubmit={enviarLinkMagico} className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="email-otp">E-mail para receber código</Label>
-                    <Input
-                      id="email-otp"
-                      type="email"
-                      required
-                      autoComplete="email"
-                      placeholder="seu.email@exemplo.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      Sem necessidade de senha. Enviamos um código ou link de 1 clique direto para
-                      sua caixa de entrada.
-                    </p>
-                  </div>
-                  <Button type="submit" className="w-full" disabled={carregando}>
-                    {carregando ? "Enviando..." : "Enviar código de acesso"}
-                  </Button>
-                </form>
-              </TabsContent>
-
-              <TabsContent value="criar" className="mt-4">
-                <form onSubmit={cadastrar} className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="nome">Seu nome</Label>
-                    <Input
-                      id="nome"
-                      required
-                      placeholder="Ex: João da Silva"
-                      value={nome}
-                      onChange={(e) => setNome(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="email-novo">E-mail</Label>
-                    <Input
-                      id="email-novo"
-                      type="email"
-                      required
-                      autoComplete="email"
-                      placeholder="seu.email@exemplo.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="senha-nova">Senha (mín. 6 caracteres)</Label>
-                    <Input
-                      id="senha-nova"
-                      type="password"
-                      required
-                      minLength={6}
-                      autoComplete="new-password"
-                      value={senha}
-                      onChange={(e) => setSenha(e.target.value)}
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={carregando}>
-                    {carregando ? "Cadastrando..." : "Criar conta de agência"}
-                  </Button>
-                </form>
-              </TabsContent>
-            </Tabs>
           )}
 
-          {!aguardandoConfirmacao ? (
-            <>
-              <div className="my-3 flex items-center gap-3">
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-[11px] text-muted-foreground">ou acesso rápido</span>
-                <span className="h-px flex-1 bg-border" />
+          {/* 2. MODO: CRIAR CONTA */}
+          {modo === "cadastro" && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Criar conta</h2>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Cadastre sua agência e comece a gerenciar suas escalas.
+                </p>
               </div>
-              <Button
-                variant="outline"
-                className="w-full font-medium"
-                onClick={comGoogle}
-                disabled={carregando}
-              >
-                Entrar com Google
-              </Button>
 
-              <div className="rounded-lg bg-muted/60 p-3 text-[11px] text-muted-foreground space-y-1 border border-border/60">
-                <p className="font-semibold text-foreground flex items-center gap-1.5">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                  Ambiente de Teste & Validação
-                </p>
-                <p>
-                  Para testar agora mesmo, clique em <strong>Entrar com Google</strong> com sua
-                  conta autorizada ou utilize a aba <strong>Código</strong> para receber acesso
-                  imediato sem senha.
+              <form onSubmit={handleCadastro} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="nome" className="text-xs sm:text-sm font-medium">
+                    Seu nome completo
+                  </Label>
+                  <Input
+                    id="nome"
+                    type="text"
+                    required
+                    placeholder="Ex: Carlos Eduardo"
+                    value={nome}
+                    onChange={(e) => setNome(e.target.value)}
+                    className="h-11 text-base sm:text-sm rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="email-cad" className="text-xs sm:text-sm font-medium">
+                    E-mail da agência ou corporativo
+                  </Label>
+                  <Input
+                    id="email-cad"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    placeholder="seu.email@empresa.com.br"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="h-11 text-base sm:text-sm rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="senha-cad" className="text-xs sm:text-sm font-medium">
+                    Crie uma senha (mín. 6 caracteres)
+                  </Label>
+                  <Input
+                    id="senha-cad"
+                    type="password"
+                    required
+                    minLength={6}
+                    autoComplete="new-password"
+                    placeholder="Mínimo de 6 dígitos"
+                    value={senha}
+                    onChange={(e) => setSenha(e.target.value)}
+                    className="h-11 text-base sm:text-sm rounded-xl"
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={carregando}
+                  className="w-full h-11 sm:h-12 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:text-base shadow-sm transition-all"
+                >
+                  {carregando ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="size-4 animate-spin" />
+                      <span>Criando conta...</span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-2">
+                      <UserPlus className="size-4" />
+                      <span>Criar conta e começar</span>
+                    </span>
+                  )}
+                </Button>
+              </form>
+
+              {/* Alternar para Login */}
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+                <p className="text-xs sm:text-sm text-slate-500">
+                  Já possui cadastro?{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModo("login");
+                    }}
+                    className="font-bold text-blue-600 hover:text-blue-700 hover:underline ml-1"
+                  >
+                    Fazer login
+                  </button>
                 </p>
               </div>
-            </>
-          ) : null}
+            </div>
+          )}
+
+          {/* 3. MODO: ESQUECI MINHA SENHA */}
+          {modo === "recuperar" && (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+                  Esqueci minha senha
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+                  Digite seu e-mail para receber as instruções de recuperação.
+                </p>
+              </div>
+
+              {recuperacaoEnviada ? (
+                <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-4 text-center space-y-3 dark:bg-emerald-950/40 dark:border-emerald-800">
+                  <div className="mx-auto flex size-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900 dark:text-emerald-300">
+                    <CheckCircle2 className="size-6" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-200">
+                      Link enviado com sucesso!
+                    </p>
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-1">
+                      Verifique a caixa de entrada de <strong>{email}</strong> para redefinir sua
+                      senha.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setRecuperacaoEnviada(false);
+                      setModo("login");
+                    }}
+                    className="w-full mt-2"
+                  >
+                    Voltar para o login
+                  </Button>
+                </div>
+              ) : (
+                <form onSubmit={handleRecuperarSenha} className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email-rec" className="text-xs sm:text-sm font-medium">
+                      E-mail cadastrado
+                    </Label>
+                    <Input
+                      id="email-rec"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      placeholder="seu.email@empresa.com.br"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="h-11 text-base sm:text-sm rounded-xl"
+                    />
+                  </div>
+
+                  <Button
+                    type="submit"
+                    size="lg"
+                    disabled={carregando}
+                    className="w-full h-11 sm:h-12 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm sm:text-base shadow-sm transition-all"
+                  >
+                    {carregando ? (
+                      <span className="inline-flex items-center gap-2">
+                        <Loader2 className="size-4 animate-spin" />
+                        <span>Enviando...</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-2">
+                        <Mail className="size-4" />
+                        <span>Enviar link de recuperação</span>
+                      </span>
+                    )}
+                  </Button>
+
+                  <div className="pt-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setModo("login")}
+                      className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                    >
+                      <ArrowLeft className="size-3.5" />
+                      <span>Voltar para o login</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      <footer className="mt-8 text-center text-xs text-muted-foreground">
+      {/* Rodapé Institucional */}
+      <footer className="mt-8 text-center text-xs text-slate-400">
         <p>
-          Já é uma plataforma corporativa da{" "}
+          Já é uma plataforma corporativa desenvolvida pela{" "}
           <a
             href="https://www.swali.com.br/"
             target="_blank"
             rel="noreferrer"
-            className="font-medium text-foreground underline decoration-primary/50 hover:text-primary transition-colors"
+            className="font-semibold text-slate-600 dark:text-slate-300 underline hover:text-blue-600 transition-colors"
           >
             Swali (swali.com.br)
           </a>

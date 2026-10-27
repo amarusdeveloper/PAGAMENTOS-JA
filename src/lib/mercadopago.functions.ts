@@ -2,7 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { requireCapability } from "@/lib/autorizacao.server";
+import { requireCapability, requireOrganizationContext } from "@/lib/autorizacao.server";
+import { verificarStatusAssinaturaEmpresa } from "@/lib/mercadopago.server";
 
 const salvarCredenciaisSchema = z.object({
   applicationId: z.string().trim().min(3, "Application ID obrigatório"),
@@ -57,7 +58,7 @@ export const obterConfiguracaoMercadoPago = createServerFn({ method: "GET" })
 
 export const salvarCredenciaisMercadoPago = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => salvarCredenciaisSchema.parse(input))
+  .validator((input: unknown) => salvarCredenciaisSchema.parse(input))
   .handler(async ({ data, context }) => {
     const { empresaId } = await requireCapability(
       context.supabase,
@@ -67,7 +68,7 @@ export const salvarCredenciaisMercadoPago = createServerFn({ method: "POST" })
     if (!empresaId) throw new Error("Organização não encontrada.");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    // Masked storage of access token and metadata
+    // Armazenamento das credenciais da conta do cliente
     const userIdIdentificador = data.applicationId;
     const { data: existente } = await supabaseAdmin
       .from("mercado_pago_contas")
@@ -123,4 +124,23 @@ export const salvarCredenciaisMercadoPago = createServerFn({ method: "POST" })
     });
 
     return { ok: true, status: "ativo" };
+  });
+
+/**
+ * Consulta o status da assinatura SaaS da empresa cliente via Mercado Pago.
+ * Usado pelo frontend para exibir avisos de pagamento pendente ou bloqueio.
+ */
+export const consultarStatusAssinaturaMercadoPago = createServerFn({
+  method: "GET",
+})
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const org = requireOrganizationContext(context);
+    const empresaId = org.empresaId;
+    if (!empresaId) {
+      throw new Error("Agência não identificada no contexto.");
+    }
+
+    const resultado = await verificarStatusAssinaturaEmpresa(empresaId);
+    return resultado;
   });

@@ -114,12 +114,12 @@ function Landing() {
             </div>
 
             {/* Top Navigation Links & Actions */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
               <Button
                 asChild
                 size="sm"
                 variant="outline"
-                className="border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium px-4 h-9 shadow-2xs"
+                className="hidden sm:inline-flex border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium px-3.5 h-9 shadow-2xs text-xs"
               >
                 <a href="https://www.swali.com.br/" target="_blank" rel="noreferrer">
                   Sobre a Swali
@@ -128,32 +128,32 @@ function Landing() {
               <Button
                 asChild
                 size="sm"
-                className="bg-slate-950 text-white hover:bg-slate-800 font-medium px-4.5 h-9 shadow-xs"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 sm:px-4.5 h-9 rounded-lg text-xs sm:text-sm shadow-xs"
               >
-                <Link to="/auth">Entrar na plataforma</Link>
+                <Link to="/auth">Entrar</Link>
               </Button>
             </div>
           </div>
         </header>
 
         {/* Hero Section */}
-        <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-10 pb-16 lg:pt-14 lg:pb-20">
-          <div className="grid lg:grid-cols-12 gap-10 lg:gap-8 items-center">
+        <main className="mx-auto max-w-6xl px-4 sm:px-6 pt-8 pb-14 lg:pt-14 lg:pb-20">
+          <div className="grid lg:grid-cols-12 gap-8 lg:gap-8 items-center">
             {/* Left Content */}
             <div className="lg:col-span-7">
               {/* Category Badge */}
-              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100/90 px-3.5 py-1 text-xs font-medium text-slate-700 shadow-2xs mb-6">
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100/90 px-3 py-1 text-xs font-medium text-slate-700 shadow-2xs mb-4 sm:mb-6">
                 <ShieldCheck className="size-3.5 text-blue-600" />
                 <span>SaaS B2B para Agências de Eventos e Produtoras</span>
               </div>
 
               {/* Headline */}
-              <h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-slate-950 leading-[1.12]">
+              <h1 className="text-3xl sm:text-5xl lg:text-[3.25rem] font-extrabold tracking-tight text-slate-950 leading-[1.15] sm:leading-[1.12]">
                 Do primeiro convite ao Pix do freelancer, tudo no mesmo fluxo.
               </h1>
 
               {/* Description */}
-              <p className="mt-6 text-base sm:text-lg text-slate-600 leading-relaxed max-w-2xl">
+              <p className="mt-4 sm:mt-6 text-sm sm:text-lg text-slate-600 leading-relaxed max-w-2xl">
                 O <strong>Já — Gestão de Equipes e Pagamentos</strong> é a plataforma operacional
                 desenvolvida pela{" "}
                 <a
@@ -169,13 +169,13 @@ function Landing() {
               </p>
 
               {/* Call to Actions */}
-              <div className="mt-8 flex flex-wrap items-center gap-3.5">
+              <div className="mt-6 sm:mt-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                 <Button
                   asChild
                   size="lg"
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6.5 h-12 rounded-xl shadow-md hover:shadow-lg transition-all"
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6.5 h-12 rounded-xl shadow-md hover:shadow-lg transition-all w-full sm:w-auto justify-center"
                 >
-                  <Link to="/auth" className="inline-flex items-center gap-2">
+                  <Link to="/auth" className="inline-flex items-center justify-center gap-2">
                     <span>Acessar agora</span>
                     <ArrowRight className="size-4" />
                   </Link>
@@ -184,13 +184,13 @@ function Landing() {
                   asChild
                   size="lg"
                   variant="outline"
-                  className="border-slate-200 bg-white/90 hover:bg-slate-100 text-slate-800 font-medium px-6 h-12 rounded-xl shadow-2xs"
+                  className="border-slate-200 bg-white/90 hover:bg-slate-100 text-slate-800 font-medium px-6 h-12 rounded-xl shadow-2xs w-full sm:w-auto justify-center"
                 >
                   <a
                     href="https://www.swali.com.br/"
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-2"
+                    className="inline-flex items-center justify-center gap-2"
                   >
                     <span>Conhecer soluções Swali</span>
                     <ExternalLink className="size-3.5 text-slate-400" />

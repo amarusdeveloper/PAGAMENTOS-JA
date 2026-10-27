@@ -54,21 +54,42 @@ async function limitarTentativas(token: string, cpf: string | null, acao: string
   return { registrar };
 }
 
-function validarValidadeQr(evento: { data_fim: string | null; qr_code_expira_em: string | null }) {
-  const expiraEm =
-    evento.qr_code_expira_em ??
-    (evento.data_fim
-      ? new Date(new Date(evento.data_fim).getTime() + 12 * 60 * 60_000).toISOString()
-      : null);
-  if (expiraEm && Date.now() > new Date(expiraEm).getTime()) {
-    throw new Error("Este QR Code expirou 12 horas após o encerramento do evento.");
+function validarValidadeQr(evento: {
+  data_fim: string | null;
+  qr_code_expira_em: string | null;
+  status?: string | null;
+}) {
+  const agora = Date.now();
+
+  // 1. Se houver data de expiração explícita gravada no evento
+  if (evento.qr_code_expira_em) {
+    const limiteExpira = new Date(evento.qr_code_expira_em).getTime();
+    if (agora > limiteExpira) {
+      throw new Error(
+        "Este QR Code de ponto está expirado. Solicite ao coordenador do evento para clicar em 'Trocar QR' no painel para gerar um novo código ativo.",
+      );
+    }
+    return evento.qr_code_expira_em;
   }
-  return expiraEm;
+
+  // 2. Fallback de cálculo seguro: se data_fim existir e ainda não passou 12h do fim
+  if (evento.data_fim) {
+    const limite12h = new Date(evento.data_fim).getTime() + 12 * 60 * 60_000;
+    if (agora > limite12h) {
+      throw new Error(
+        "Este QR Code expirou após o encerramento do evento. Peça ao supervisor para clicar em 'Trocar QR' no painel para reativar o ponto.",
+      );
+    }
+    return new Date(limite12h).toISOString();
+  }
+
+  // 3. Se for evento contínuo sem data_fim e sem qr_code_expira_em
+  return new Date(agora + 12 * 60 * 60_000).toISOString();
 }
 
 /** Contexto público mínimo do evento a partir do token do QR Code. */
 export const obterContextoPonto = createServerFn({ method: "GET" })
-  .inputValidator((input: unknown) => tokenSchema.parse(input))
+  .validator((input: unknown) => tokenSchema.parse(input))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: evento } = await supabaseAdmin
@@ -145,7 +166,7 @@ async function localizarEscala(token: string, cpf: string) {
 
 /** Identifica o freelancer pelo CPF e devolve os pontos que ele já registrou. */
 export const identificarNoPonto = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => identificarSchema.parse(input))
+  .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
     const tentativa = await limitarTentativas(data.token, data.cpf, "identificacao");
     let localizado: Awaited<ReturnType<typeof localizarEscala>>;
@@ -174,7 +195,7 @@ export const identificarNoPonto = createServerFn({ method: "POST" })
 
 /** Confirma a presença na escala a partir do próprio celular do freelancer. */
 export const confirmarPresenca = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => identificarSchema.parse(input))
+  .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
     const tentativa = await limitarTentativas(data.token, data.cpf, "confirmacao");
     const { supabaseAdmin, escala } = await localizarEscala(data.token, data.cpf);
@@ -193,7 +214,7 @@ export const confirmarPresenca = createServerFn({ method: "POST" })
 
 /** Registra entrada, intervalo ou saída. Fica pendente até o supervisor aprovar. */
 export const registrarPonto = createServerFn({ method: "POST" })
-  .inputValidator((input: unknown) => registrarSchema.parse(input))
+  .validator((input: unknown) => registrarSchema.parse(input))
   .handler(async ({ data }) => {
     const tentativa = await limitarTentativas(data.token, data.cpf, "registro");
     const { supabaseAdmin, evento, escala } = await localizarEscala(data.token, data.cpf);

@@ -108,22 +108,38 @@ export const lancarPontoManual = createServerFn({ method: "POST" })
 
 export const rotacionarQrEvento = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => z.object({ eventoId: z.string().uuid() }).parse(input))
+  .validator((input: unknown) => z.object({ eventoId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const contexto = await requireCapability(context.supabase, context.userId, "eventos.gerenciar");
-    const { data: evento } = await context.supabase
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    const { data: evento } = await supabaseAdmin
       .from("eventos")
-      .select("empresa_id, data_fim")
+      .select("empresa_id, data_fim, status")
       .eq("id", data.eventoId)
       .maybeSingle();
-    if (!evento || evento.empresa_id !== contexto.empresaId)
+
+    if (!evento || evento.empresa_id !== contexto.empresaId) {
       throw new Error("Evento não encontrado.");
-    const geradoEm = new Date();
-    const expiraEm = evento.data_fim
-      ? new Date(new Date(evento.data_fim).getTime() + 12 * 60 * 60_000).toISOString()
+    }
+
+    const agora = Date.now();
+    const geradoEm = new Date(agora);
+    // Garante que o novo QR Code tenha no mínimo 12 horas de validade a partir do momento da troca
+    const dozeHorasApartirDeAgora = new Date(agora + 12 * 60 * 60_000);
+    const dozeHorasAposFim = evento.data_fim
+      ? new Date(new Date(evento.data_fim).getTime() + 12 * 60 * 60_000)
       : null;
+
+    const dataFinalExpira =
+      dozeHorasAposFim && dozeHorasAposFim.getTime() > dozeHorasApartirDeAgora.getTime()
+        ? dozeHorasAposFim
+        : dozeHorasApartirDeAgora;
+
+    const expiraEm = dataFinalExpira.toISOString();
     const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
-    const { error } = await context.supabase
+
+    const { error } = await supabaseAdmin
       .from("eventos")
       .update({
         qr_code_token: token,
@@ -131,8 +147,11 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
         qr_code_expira_em: expiraEm,
       })
       .eq("id", data.eventoId);
-    if (error) throw error;
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+    if (error) {
+      throw new Error(`Falha ao atualizar QR Code do evento: ${error.message}`);
+    }
+
     await supabaseAdmin.from("logs_auditoria").insert({
       empresa_id: evento.empresa_id,
       ator_id: context.userId,
@@ -141,7 +160,11 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
       recurso_tipo: "evento",
       recurso_id: data.eventoId,
       resultado: "sucesso",
-      detalhes: { expira_em: expiraEm },
+      detalhes: {
+        token_gerado: token.slice(0, 8) + "...",
+        expira_em: expiraEm,
+      },
     });
-    return { token, expiraEm };
+
+    return { ok: true, token, expiraEm };
   });

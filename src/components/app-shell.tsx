@@ -478,10 +478,10 @@ export function AppShell({
         </aside>
 
         {/* Área de Conteúdo Principal */}
-        <div className="flex min-h-screen flex-col pb-20 lg:pb-0">
-          <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 lg:px-6">
-              <div className="flex items-center gap-3 min-w-0">
+        <div className="flex min-h-screen flex-col pb-24 lg:pb-0">
+          <header className="sticky top-0 z-30 border-b border-border/70 bg-background/90 backdrop-blur-xl safe-area-top">
+            <div className="flex items-center justify-between gap-3 px-3.5 py-2.5 sm:px-4 sm:py-3 lg:px-6">
+              <div className="flex items-center gap-2.5 min-w-0">
                 {/* Botão de alternar sidebar no topo (desktop) */}
                 <Button
                   variant="ghost"
@@ -498,21 +498,17 @@ export function AppShell({
                   )}
                 </Button>
 
+                {/* Badge do App no Mobile */}
+                <div className="flex lg:hidden items-center justify-center size-8 rounded-xl bg-blue-600 text-white font-black text-xs shadow-xs shrink-0">
+                  Já
+                </div>
+
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-black uppercase tracking-wider text-primary lg:hidden">
-                      Já
-                    </span>
-                    <span className="text-[10px] text-muted-foreground lg:hidden">
-                      por{" "}
-                      <a
-                        href="https://www.swali.com.br/"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="underline font-medium hover:text-foreground"
-                      >
-                        Swali
-                      </a>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-semibold text-muted-foreground truncate lg:hidden max-w-[150px]">
+                      {temContextoPlataforma
+                        ? "Plataforma Já"
+                        : (sessao?.empresa?.nome ?? "Agência")}
                     </span>
                     {categoriaAtual ? (
                       <span className="hidden sm:inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -520,11 +516,13 @@ export function AppShell({
                       </span>
                     ) : null}
                   </div>
-                  <h1 className="truncate text-base lg:text-lg font-bold tracking-tight text-foreground">
+                  <h1 className="truncate text-sm sm:text-base lg:text-lg font-bold tracking-tight text-foreground leading-tight">
                     {titulo}
                   </h1>
                   {descricao ? (
-                    <p className="truncate text-xs text-muted-foreground">{descricao}</p>
+                    <p className="hidden md:block truncate text-xs text-muted-foreground">
+                      {descricao}
+                    </p>
                   ) : null}
                 </div>
               </div>
@@ -556,10 +554,10 @@ export function AppShell({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="flex items-center gap-2 pl-1.5 pr-2 h-9 rounded-full hover:bg-accent border border-transparent hover:border-border transition-all"
+                      className="flex items-center gap-1.5 p-1 h-9 rounded-full hover:bg-accent border border-transparent hover:border-border transition-all"
                     >
-                      <Avatar className="size-7 border border-border">
-                        <AvatarFallback className="text-[11px] font-bold bg-primary/10 text-primary">
+                      <Avatar className="size-8 border border-border/80 shadow-2xs">
+                        <AvatarFallback className="text-xs font-bold bg-blue-600 text-white">
                           {extrairIniciais(sessao?.usuario.nome)}
                         </AvatarFallback>
                       </Avatar>
@@ -568,8 +566,8 @@ export function AppShell({
                       </span>
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-56 p-1.5">
-                    <DropdownMenuLabel className="font-normal p-2">
+                  <DropdownMenuContent align="end" className="w-56 p-1.5 rounded-2xl shadow-xl">
+                    <DropdownMenuLabel className="font-normal p-2.5">
                       <div className="flex flex-col space-y-1">
                         <p className="text-xs font-bold leading-none text-foreground">
                           {sessao?.usuario.nome}
@@ -614,23 +612,11 @@ export function AppShell({
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-
-                {/* Botão de saída rápida no mobile */}
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="lg:hidden size-8 p-0 text-muted-foreground hover:text-foreground"
-                  onClick={sair}
-                  aria-label="Sair"
-                  title="Sair"
-                >
-                  <LogOut className="size-4" />
-                </Button>
               </div>
             </div>
           </header>
 
-          <main className="flex-1 px-4 py-4 lg:px-6 lg:py-6">{children}</main>
+          <main className="flex-1 px-3.5 py-4 sm:px-6 sm:py-6">{children}</main>
 
           {/* Rodapé Desktop */}
           <footer className="border-t border-border/60 py-4 px-4 text-center text-xs text-muted-foreground hidden lg:block">
@@ -648,8 +634,8 @@ export function AppShell({
           </footer>
         </div>
 
-        {/* Barra de Navegação Inferior para Dispositivos Móveis */}
-        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-background/98 backdrop-blur-md lg:hidden shadow-lg safe-area-pb">
+        {/* Barra de Navegação Inferior Nativa (Estilo App iOS/Android) */}
+        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-slate-200/80 bg-white/95 backdrop-blur-xl dark:border-slate-800/80 dark:bg-slate-950/95 lg:hidden shadow-[0_-4px_25px_rgba(0,0,0,0.06)] safe-area-pb select-none">
           {itensMobileFixos.map((item) => {
             const ativo =
               pathname === item.to || (item.to !== "/painel" && pathname.startsWith(item.to));
@@ -659,30 +645,59 @@ export function AppShell({
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  "flex flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium transition-colors touch-manipulation",
+                  "relative flex flex-col items-center justify-center gap-1 py-1.5 text-[10px] font-medium transition-all active:scale-90 touch-manipulation",
                   ativo
-                    ? "text-primary font-semibold"
-                    : "text-muted-foreground hover:text-foreground",
+                    ? "text-blue-600 dark:text-blue-400 font-bold"
+                    : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white",
                 )}
               >
-                <Icone className={cn("size-5", ativo && "stroke-[2.25]")} />
-                <span className="truncate px-0.5">{item.label}</span>
+                {ativo && (
+                  <span className="absolute top-1 size-1 rounded-full bg-blue-600 dark:bg-blue-400" />
+                )}
+                <div
+                  className={cn(
+                    "flex size-8 items-center justify-center rounded-xl transition-all",
+                    ativo ? "bg-blue-50 dark:bg-blue-950/60" : "bg-transparent",
+                  )}
+                >
+                  <Icone
+                    className={cn(
+                      "size-5",
+                      ativo && "stroke-[2.25] text-blue-600 dark:text-blue-400",
+                    )}
+                  />
+                </div>
+                <span className="truncate px-0.5 max-w-[56px] leading-none tracking-tight">
+                  {item.label}
+                </span>
               </Link>
             );
           })}
 
-          {/* Botão 'Menu' que abre a gaveta de navegação completa */}
+          {/* Botão 'Menu / Mais' que abre a gaveta nativa */}
           <Sheet open={menuAberto} onOpenChange={setMenuAberto}>
             <SheetTrigger asChild>
               <button
                 type="button"
                 className={cn(
-                  "flex flex-col items-center justify-center gap-1 py-2 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors touch-manipulation",
-                  menuAberto && "text-primary font-semibold",
+                  "relative flex flex-col items-center justify-center gap-1 py-1.5 text-[10px] font-medium transition-all active:scale-90 touch-manipulation",
+                  menuAberto
+                    ? "text-blue-600 dark:text-blue-400 font-bold"
+                    : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white",
                 )}
               >
-                <Menu className="size-5" />
-                <span>Menu</span>
+                {menuAberto && (
+                  <span className="absolute top-1 size-1 rounded-full bg-blue-600 dark:bg-blue-400" />
+                )}
+                <div
+                  className={cn(
+                    "flex size-8 items-center justify-center rounded-xl transition-all",
+                    menuAberto ? "bg-blue-50 dark:bg-blue-950/60" : "bg-transparent",
+                  )}
+                >
+                  <Menu className="size-5" />
+                </div>
+                <span className="truncate px-0.5 leading-none tracking-tight">Mais</span>
               </button>
             </SheetTrigger>
             <SheetContent side="bottom" className="max-h-[85vh] rounded-t-2xl p-0 flex flex-col">

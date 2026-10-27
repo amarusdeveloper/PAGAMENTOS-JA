@@ -6,15 +6,19 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock,
+  CreditCard,
+  FileCheck2,
   MapPin,
   Plus,
   Radio,
   ShieldAlert,
   Users,
+  Wallet,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { AlertaAssinaturaMercadoPago } from "@/components/alerta-assinatura-mercadopago";
 import { EmptyState, ErrorState, LoadingBloco } from "@/components/states";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -222,8 +226,82 @@ function Painel() {
 
   return (
     <AppShell titulo="Painel" descricao="Acompanhamento operacional e financeiro da agência">
-      {/* 1. Barra de Contexto Superior Factual */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+      <AlertaAssinaturaMercadoPago />
+      {/* Mobile App Header & Quick Action Bar (Mobile Only) */}
+      <div className="sm:hidden mb-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {sessao?.papeis && sessao.papeis.length > 0
+                ? ROTULO_PAPEL[sessao.papeis[0]!]
+                : "Organização"}
+            </p>
+            <h1 className="text-lg font-bold text-foreground tracking-tight truncate">
+              {sessao?.empresa?.nome ?? "Já Gestão"}
+            </h1>
+          </div>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold shrink-0">
+            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            Em operação
+          </div>
+        </div>
+
+        {/* Quick Action Carousel */}
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1 -mx-4 px-4">
+          {pode("eventos.gerenciar") ? (
+            <Link
+              to="/eventos"
+              className="flex items-center gap-1.5 shrink-0 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground font-semibold text-xs shadow-xs active:scale-95 transition-transform"
+            >
+              <Plus className="size-3.5" />
+              Novo evento
+            </Link>
+          ) : null}
+          <Link
+            to="/operacao"
+            className="flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-card border border-border text-foreground font-medium text-xs shadow-2xs active:scale-95 transition-transform"
+          >
+            <Radio className="size-3.5 text-primary" />
+            Ponto Digital
+            {(q.data?.pontosPendentes ?? 0) > 0 ? (
+              <span className="size-2 rounded-full bg-amber-500" />
+            ) : null}
+          </Link>
+          <Link
+            to="/freelancers"
+            className="flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-card border border-border text-foreground font-medium text-xs shadow-2xs active:scale-95 transition-transform"
+          >
+            <Users className="size-3.5 text-indigo-500" />
+            Equipes
+          </Link>
+          <Link
+            to="/saldo"
+            className="flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-card border border-border text-foreground font-medium text-xs shadow-2xs active:scale-95 transition-transform"
+          >
+            <Wallet className="size-3.5 text-emerald-500" />
+            Saldo Pix
+          </Link>
+          <Link
+            to="/fechamento"
+            className="flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-card border border-border text-foreground font-medium text-xs shadow-2xs active:scale-95 transition-transform"
+          >
+            <FileCheck2 className="size-3.5 text-sky-500" />
+            Fechamentos
+          </Link>
+          {cobranca.data && pode("configuracoes.gerenciar") ? (
+            <Link
+              to="/plano"
+              className="flex items-center gap-1.5 shrink-0 px-3 py-2 rounded-xl bg-card border border-border text-foreground font-medium text-xs shadow-2xs active:scale-95 transition-transform"
+            >
+              <CreditCard className="size-3.5 text-purple-500" />
+              Meu plano
+            </Link>
+          ) : null}
+        </div>
+      </div>
+
+      {/* 1. Barra de Contexto Superior Factual (Desktop / Tablet) */}
+      <div className="hidden sm:flex mb-6 flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="font-semibold text-foreground">
             {sessao?.empresa?.nome ?? "Organização"}
@@ -277,10 +355,198 @@ function Painel() {
         <ErrorState error={q.error} onRetry={() => q.refetch()} />
       ) : (
         <div className="space-y-6">
-          {/* 2. Faixa Integrada de Indicadores Operacionais e Financeiros */}
+          {/* 2. Mobile Native App Indicators (Mobile Only) */}
+          <section
+            aria-label="Indicadores da agência"
+            className="grid grid-cols-2 gap-2.5 sm:hidden"
+          >
+            {/* Eventos */}
+            <Link
+              to="/eventos"
+              className="p-3.5 rounded-2xl border border-border bg-card shadow-2xs active:scale-[0.98] transition-transform space-y-2 block"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Eventos
+                </span>
+                <span className="size-7 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+                  <CalendarDays className="size-3.5" />
+                </span>
+              </div>
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-foreground tabular-nums">
+                  {q.data.eventos.length}
+                </p>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {eventosAoVivo.length > 0 ? `${eventosAoVivo.length} em campo` : "Ativos"}
+                </p>
+              </div>
+            </Link>
+
+            {/* Escalas */}
+            <Link
+              to="/freelancers"
+              className="p-3.5 rounded-2xl border border-border bg-card shadow-2xs active:scale-[0.98] transition-transform space-y-2 block"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Escalas
+                </span>
+                <span className="size-7 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                  <Users className="size-3.5" />
+                </span>
+              </div>
+              <div>
+                <p className="text-2xl font-bold tracking-tight text-foreground tabular-nums">
+                  {q.data.escalasConfirmadas}
+                </p>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {q.data.colaboradoresAtivos} colaboradores
+                </p>
+              </div>
+            </Link>
+
+            {/* Pontos a Revisar */}
+            <Link
+              to="/operacao"
+              className={cn(
+                "p-3.5 rounded-2xl border bg-card shadow-2xs active:scale-[0.98] transition-transform space-y-2 block",
+                q.data.pontosPendentes > 0
+                  ? "border-amber-500/40 bg-amber-500/[0.03]"
+                  : "border-border",
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Ponto
+                </span>
+                <span
+                  className={cn(
+                    "size-7 rounded-xl flex items-center justify-center",
+                    q.data.pontosPendentes > 0
+                      ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  <Clock className="size-3.5" />
+                </span>
+              </div>
+              <div>
+                <p
+                  className={cn(
+                    "text-2xl font-bold tracking-tight tabular-nums",
+                    q.data.pontosPendentes > 0
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-foreground",
+                  )}
+                >
+                  {q.data.pontosPendentes}
+                </p>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {q.data.pontosPendentes > 0 ? "Aprovação pendente" : "Tudo conferido"}
+                </p>
+              </div>
+            </Link>
+
+            {/* Fechamentos */}
+            <Link
+              to="/fechamento"
+              className={cn(
+                "p-3.5 rounded-2xl border bg-card shadow-2xs active:scale-[0.98] transition-transform space-y-2 block",
+                q.data.fechamentosPendentes > 0
+                  ? "border-sky-500/40 bg-sky-500/[0.03]"
+                  : "border-border",
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Fechamento
+                </span>
+                <span className="size-7 rounded-xl bg-sky-500/10 text-sky-600 dark:text-sky-400 flex items-center justify-center">
+                  <FileCheck2 className="size-3.5" />
+                </span>
+              </div>
+              <div>
+                <p
+                  className={cn(
+                    "text-2xl font-bold tracking-tight tabular-nums",
+                    q.data.fechamentosPendentes > 0
+                      ? "text-sky-600 dark:text-sky-400"
+                      : "text-foreground",
+                  )}
+                >
+                  {q.data.fechamentosPendentes}
+                </p>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {q.data.fechamentosPendentes > 0 ? "A conferir" : "Sem pendências"}
+                </p>
+              </div>
+            </Link>
+
+            {/* Saldo Disponível */}
+            <Link
+              to="/saldo"
+              className="p-3.5 rounded-2xl border border-border bg-card shadow-2xs active:scale-[0.98] transition-transform space-y-2 block"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Saldo Pix
+                </span>
+                <span className="size-7 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                  <Wallet className="size-3.5" />
+                </span>
+              </div>
+              <div>
+                <p className="text-xl font-bold tracking-tight text-foreground tabular-nums truncate">
+                  {moeda(q.data.saldoReal)}
+                </p>
+                <p className="text-[11px] text-muted-foreground truncate">Conta da agência</p>
+              </div>
+            </Link>
+
+            {/* A Transferir */}
+            <Link
+              to="/financeiro"
+              className={cn(
+                "p-3.5 rounded-2xl border bg-card shadow-2xs active:scale-[0.98] transition-transform space-y-2 block",
+                saldoDeficitario ? "border-rose-500/40 bg-rose-500/[0.03]" : "border-border",
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Repasses
+                </span>
+                <span
+                  className={cn(
+                    "size-7 rounded-xl flex items-center justify-center",
+                    saldoDeficitario
+                      ? "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  <CreditCard className="size-3.5" />
+                </span>
+              </div>
+              <div>
+                <p
+                  className={cn(
+                    "text-xl font-bold tracking-tight tabular-nums truncate",
+                    saldoDeficitario ? "text-rose-600 dark:text-rose-400" : "text-foreground",
+                  )}
+                >
+                  {moeda(q.data.aPagar)}
+                </p>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {saldoDeficitario ? "Aporte requerido" : `Pago: ${moeda(q.data.pago)}`}
+                </p>
+              </div>
+            </Link>
+          </section>
+
+          {/* 2b. Indicadores Clássicos para Desktop / Tablet */}
           <section
             aria-label="Indicadores principais"
-            className="grid grid-cols-2 divide-y divide-border border border-border bg-card sm:grid-cols-3 sm:divide-y-0 sm:divide-x lg:grid-cols-6 rounded-lg shadow-2xs"
+            className="hidden sm:grid grid-cols-3 divide-y divide-border border border-border bg-card sm:divide-y-0 sm:divide-x lg:grid-cols-6 rounded-lg shadow-2xs"
           >
             {/* Eventos */}
             <Link
@@ -401,24 +667,24 @@ function Painel() {
           {/* 3. Grid Principal: Operação de Eventos (Esq) + Central de Pendências e Finanças (Dir) */}
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 items-start">
             {/* Coluna Principal: Eventos e Operação em Campo */}
-            <section className="lg:col-span-8 rounded-lg border border-border bg-card shadow-2xs">
+            <section className="lg:col-span-8 rounded-2xl border border-border bg-card shadow-2xs overflow-hidden">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <h2 className="text-sm font-semibold text-foreground">Eventos da agência</h2>
                   <span className="text-xs text-muted-foreground tabular-nums">
                     ({eventos.length})
                   </span>
                 </div>
 
-                {/* Filtro limpo sem pílulas coloridas */}
-                <div className="flex items-center gap-1 text-xs">
+                {/* Filtro segmentado estilo iOS */}
+                <div className="flex items-center gap-1 text-xs bg-muted/60 p-1 rounded-xl">
                   <button
                     type="button"
                     onClick={() => setFiltroEventos("todos")}
                     className={cn(
-                      "px-2.5 py-1 rounded-md transition-colors",
+                      "px-2.5 py-1 rounded-lg transition-colors font-medium text-xs",
                       filtroEventos === "todos"
-                        ? "bg-muted font-semibold text-foreground"
+                        ? "bg-card text-foreground shadow-2xs font-semibold"
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
@@ -429,13 +695,13 @@ function Painel() {
                       type="button"
                       onClick={() => setFiltroEventos("aovivo")}
                       className={cn(
-                        "px-2.5 py-1 rounded-md transition-colors inline-flex items-center gap-1.5",
+                        "px-2.5 py-1 rounded-lg transition-colors inline-flex items-center gap-1.5 font-medium text-xs",
                         filtroEventos === "aovivo"
-                          ? "bg-muted font-semibold text-foreground"
+                          ? "bg-card text-foreground shadow-2xs font-semibold"
                           : "text-muted-foreground hover:text-foreground",
                       )}
                     >
-                      <span className="size-1.5 rounded-full bg-emerald-500" />
+                      <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
                       Em campo ({eventosAoVivo.length})
                     </button>
                   ) : null}
@@ -443,9 +709,9 @@ function Painel() {
                     type="button"
                     onClick={() => setFiltroEventos("proximos")}
                     className={cn(
-                      "px-2.5 py-1 rounded-md transition-colors",
+                      "px-2.5 py-1 rounded-lg transition-colors font-medium text-xs",
                       filtroEventos === "proximos"
-                        ? "bg-muted font-semibold text-foreground"
+                        ? "bg-card text-foreground shadow-2xs font-semibold"
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
@@ -477,83 +743,162 @@ function Painel() {
                   />
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-border bg-muted/25 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                      <tr>
-                        <th className="px-4 py-2.5 sm:px-5">Evento</th>
-                        <th className="px-3 py-2.5">Início</th>
-                        <th className="px-3 py-2.5">Local</th>
-                        <th className="px-3 py-2.5">Status</th>
-                        <th className="px-4 py-2.5 text-right sm:px-5">Ação</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/60">
-                      {eventosFiltrados.map((ev) => {
-                        const emCampo = ["em_execucao", "pronto", "encerrando"].includes(ev.status);
-                        return (
-                          <tr
-                            key={ev.id}
-                            className={cn(
-                              "transition-colors hover:bg-muted/40",
-                              emCampo && "bg-muted/15",
-                            )}
-                          >
-                            <td className="px-4 py-3 sm:px-5">
-                              <Link
-                                to="/eventos/$eventoId"
-                                params={{ eventoId: ev.id }}
-                                className="font-semibold text-foreground hover:text-primary hover:underline transition-colors block"
-                              >
-                                {ev.nome}
-                              </Link>
-                              {emCampo ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
-                                  <span className="size-1 rounded-full bg-emerald-500" /> Em campo
-                                </span>
-                              ) : null}
-                            </td>
-                            <td className="px-3 py-3 text-muted-foreground whitespace-nowrap tabular-nums">
+                <>
+                  {/* Visão Mobile: Lista de cartões com toques rápidos (Mobile App Style) */}
+                  <div className="sm:hidden divide-y divide-border/60">
+                    {eventosFiltrados.map((ev) => {
+                      const emCampo = ["em_execucao", "pronto", "encerrando"].includes(ev.status);
+                      return (
+                        <div
+                          key={ev.id}
+                          className="p-3.5 space-y-2.5 active:bg-muted/40 transition-colors"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <Link
+                              to="/eventos/$eventoId"
+                              params={{ eventoId: ev.id }}
+                              className="font-bold text-sm text-foreground hover:text-primary transition-colors line-clamp-1"
+                            >
+                              {ev.nome}
+                            </Link>
+                            <StatusBadge status={ev.status} />
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                            <span className="inline-flex items-center gap-1.5 tabular-nums">
+                              <CalendarDays className="size-3 text-muted-foreground/70" />
                               {dataHora(ev.data_inicio)}
-                            </td>
-                            <td className="px-3 py-3 text-muted-foreground truncate max-w-[160px] sm:max-w-[200px]">
-                              {ev.local || "—"}
-                            </td>
-                            <td className="px-3 py-3 whitespace-nowrap">
-                              <StatusBadge status={ev.status} />
-                            </td>
-                            <td className="px-4 py-3 text-right whitespace-nowrap sm:px-5">
-                              <div className="flex items-center justify-end gap-1.5">
-                                {emCampo && pode("operacao.supervisionar") ? (
-                                  <Button
-                                    asChild
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 px-2 text-[11px] gap-1 font-medium"
-                                  >
-                                    <Link to="/operacao/$eventoId" params={{ eventoId: ev.id }}>
-                                      <Radio className="size-3 text-primary" /> Ponto
-                                    </Link>
-                                  </Button>
-                                ) : null}
+                            </span>
+                            {ev.local ? (
+                              <span className="inline-flex items-center gap-1.5 truncate max-w-[170px]">
+                                <MapPin className="size-3 text-muted-foreground/70 shrink-0" />
+                                {ev.local}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1">
+                            {emCampo ? (
+                              <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                                Em campo agora
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">
+                                Detalhes e equipe
+                              </span>
+                            )}
+
+                            <div className="flex items-center gap-1.5">
+                              {emCampo && pode("operacao.supervisionar") ? (
                                 <Button
                                   asChild
                                   size="sm"
-                                  variant="ghost"
-                                  className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                                  className="h-8 px-2.5 text-xs gap-1 font-semibold shadow-2xs"
                                 >
-                                  <Link to="/eventos/$eventoId" params={{ eventoId: ev.id }}>
-                                    Detalhes
+                                  <Link to="/operacao/$eventoId" params={{ eventoId: ev.id }}>
+                                    <Radio className="size-3" /> Ponto
                                   </Link>
                                 </Button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              ) : null}
+                              <Button
+                                asChild
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                              >
+                                <Link to="/eventos/$eventoId" params={{ eventoId: ev.id }}>
+                                  Abrir <ChevronRight className="size-3 ml-0.5" />
+                                </Link>
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Visão Desktop / Tablet: Tabela Limpa */}
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="border-b border-border bg-muted/25 text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                        <tr>
+                          <th className="px-4 py-2.5 sm:px-5">Evento</th>
+                          <th className="px-3 py-2.5">Início</th>
+                          <th className="px-3 py-2.5">Local</th>
+                          <th className="px-3 py-2.5">Status</th>
+                          <th className="px-4 py-2.5 text-right sm:px-5">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/60">
+                        {eventosFiltrados.map((ev) => {
+                          const emCampo = ["em_execucao", "pronto", "encerrando"].includes(
+                            ev.status,
+                          );
+                          return (
+                            <tr
+                              key={ev.id}
+                              className={cn(
+                                "transition-colors hover:bg-muted/40",
+                                emCampo && "bg-muted/15",
+                              )}
+                            >
+                              <td className="px-4 py-3 sm:px-5">
+                                <Link
+                                  to="/eventos/$eventoId"
+                                  params={{ eventoId: ev.id }}
+                                  className="font-semibold text-foreground hover:text-primary hover:underline transition-colors block"
+                                >
+                                  {ev.nome}
+                                </Link>
+                                {emCampo ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400 font-medium mt-0.5">
+                                    <span className="size-1 rounded-full bg-emerald-500" /> Em campo
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td className="px-3 py-3 text-muted-foreground whitespace-nowrap tabular-nums">
+                                {dataHora(ev.data_inicio)}
+                              </td>
+                              <td className="px-3 py-3 text-muted-foreground truncate max-w-[160px] sm:max-w-[200px]">
+                                {ev.local || "—"}
+                              </td>
+                              <td className="px-3 py-3 whitespace-nowrap">
+                                <StatusBadge status={ev.status} />
+                              </td>
+                              <td className="px-4 py-3 text-right whitespace-nowrap sm:px-5">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {emCampo && pode("operacao.supervisionar") ? (
+                                    <Button
+                                      asChild
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 px-2 text-[11px] gap-1 font-medium"
+                                    >
+                                      <Link to="/operacao/$eventoId" params={{ eventoId: ev.id }}>
+                                        <Radio className="size-3 text-primary" /> Ponto
+                                      </Link>
+                                    </Button>
+                                  ) : null}
+                                  <Button
+                                    asChild
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                                  >
+                                    <Link to="/eventos/$eventoId" params={{ eventoId: ev.id }}>
+                                      Detalhes
+                                    </Link>
+                                  </Button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
 
               <div className="flex items-center justify-between border-t border-border px-4 py-2.5 sm:px-5 text-xs text-muted-foreground">
