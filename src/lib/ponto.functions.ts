@@ -16,399 +16,86 @@ const registrarSchema = identificarSchema.extend({
   consentiuSelfie: z.boolean().optional(),
 });
 
-const SEQUENCIA = ["entrada", "inicio_intervalo", "fim_intervalo", "saida"] as const;
+const contextoSchema = z.object({
+  pontoBasico: z.boolean(),
+  evento: z.object({
+    id: z.string().optional(),
+    nome: z.string(),
+    local: z.string().nullable(),
+    status: z.string().nullable(),
+    data_inicio: z.string(),
+    data_fim: z.string().nullable(),
+    qr_code_expira_em: z.string().nullable(),
+  }),
+  exigeSelfie: z.boolean(),
+  exigeGps: z.boolean(),
+});
 
-const contextoPontoRpcSchema = z
-  .object({
-    pontoBasico: z.boolean().optional(),
-    evento: z
-      .object({
-        id: z.string().optional(),
-        nome: z.string(),
-        local: z.string().nullable(),
-        status: z.string().nullable(),
-        data_inicio: z.string(),
-        data_fim: z.string().nullable(),
-        qr_code_expira_em: z.string().nullable(),
-      })
-      .nullable(),
-    exigeSelfie: z.boolean().optional(),
-    exigeGps: z.boolean().optional(),
-  })
-  .nullable();
+const identificacaoResultSchema = z.object({
+  escalaId: z.string().uuid(),
+  statusEscala: z.string(),
+  nome: z.string(),
+  pontos: z.array(
+    z.object({
+      id: z.string().uuid(),
+      tipo: z.string(),
+      registrado_em: z.string(),
+      status: z.string(),
+      fora_horario: z.boolean(),
+    }),
+  ),
+});
 
-async function limitarTentativas(token: string, cpf: string | null, acao: string) {
-  const { createHash } = await import("node:crypto");
-  const { getRequestHeader } = await import("@tanstack/start-server-core");
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-  const hash = (valor: string) => createHash("sha256").update(valor).digest("hex");
-  const enderecoDaRequisicao = () =>
-    getRequestHeader("cf-connecting-ip") ??
-    getRequestHeader("x-forwarded-for")?.split(",")[0]?.trim() ??
-    "indisponivel";
-
-  const desde = new Date(Date.now() - 10 * 60_000).toISOString();
-  const tokenHash = hash(token);
-  const cpfHash = cpf ? hash(cpf) : null;
-  const ipHash = hash(enderecoDaRequisicao());
-  const { count, error: erroContagem } = await supabaseAdmin
-    .from("tentativas_ponto_publico")
-    .select("id", { count: "exact", head: true })
-    .eq("token_hash", tokenHash)
-    .eq("ip_hash", ipHash)
-    .gte("criado_em", desde);
-  if (erroContagem) {
-    console.error("[Ponto público] Falha ao verificar o limite de tentativas:", erroContagem);
-    throw new Error(`Não foi possível validar tentativas do ponto: ${erroContagem.message}`);
-  }
-  if ((count ?? 0) >= 20) {
-    throw new Error("Muitas tentativas. Aguarde 10 minutos e tente novamente.");
-  }
-  const registrar = async (sucesso: boolean) => {
-    const { error } = await supabaseAdmin.from("tentativas_ponto_publico").insert({
-      token_hash: tokenHash,
-      cpf_hash: cpfHash,
-      ip_hash: ipHash,
-      acao,
-      sucesso,
-    });
-    if (error) {
-      console.error("[Ponto público] Falha ao registrar auditoria de tentativa:", error);
-      throw new Error(`Não foi possível auditar a tentativa do ponto: ${error.message}`);
+async function invokePontoEdge<T>(body: Record<string, unknown>, schema: z.ZodType<T>): Promise<T> {
+  const { createSupabasePublicClient } = await import("@/integrations/supabase/public.server");
+  const supabase = createSupabasePublicClient();
+  const { data, error } = await supabase.functions.invoke("ponto-publico", { body });
+  if (error) {
+    console.error("[Ponto público] Falha ao chamar Supabase Edge Function:", error);
+    let detalhe = error.message;
+    if (error.context instanceof Response) {
+      const body: unknown = await error.context.clone().json();
+      if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
+        detalhe = body.error;
+      }
     }
-  };
-  return { registrar };
-}
-
-function validarValidadeQr(evento: {
-  data_fim: string | null;
-  qr_code_expira_em: string | null;
-  status?: string | null;
-}) {
-  const agora = Date.now();
-
-  // 1. Se houver data de expiração explícita gravada no evento
-  if (evento.qr_code_expira_em) {
-    const limiteExpira = new Date(evento.qr_code_expira_em).getTime();
-    if (agora > limiteExpira) {
-      throw new Error(
-        "Este QR Code de ponto está expirado. Solicite ao coordenador do evento para clicar em 'Trocar QR' no painel para gerar um novo código ativo.",
-      );
-    }
-    return evento.qr_code_expira_em;
+    throw new Error(
+      `Não foi possível acessar o serviço de ponto. Confira a chave pública e a implantação da Edge Function: ${detalhe}`,
+    );
   }
-
-  // 2. Fallback de cálculo seguro: se data_fim existir e ainda não passou 12h do fim
-  if (evento.data_fim) {
-    const limite12h = new Date(evento.data_fim).getTime() + 12 * 60 * 60_000;
-    if (agora > limite12h) {
-      throw new Error(
-        "Este QR Code expirou após o encerramento do evento. Peça ao supervisor para clicar em 'Trocar QR' no painel para reativar o ponto.",
-      );
-    }
-    return new Date(limite12h).toISOString();
+  if (data && typeof data === "object" && "error" in data && typeof data.error === "string") {
+    throw new Error(data.error);
   }
-
-  // 3. Se for evento contínuo sem data_fim e sem qr_code_expira_em
-  return new Date(agora + 12 * 60 * 60_000).toISOString();
+  return schema.parse(data);
 }
 
 /** Contexto público mínimo do evento a partir do token do QR Code. */
 export const obterContextoPonto = createServerFn({ method: "GET" })
   .validator((input: unknown) => tokenSchema.parse(input))
-  .handler(async ({ data }) => {
-    const { createSupabasePublicClient } = await import("@/integrations/supabase/public.server");
-    const supabasePublico = createSupabasePublicClient();
+  .handler(({ data }) =>
+    invokePontoEdge({ action: "contexto", token: data.token }, contextoSchema),
+  );
 
-    const { data: contextoPublico, error: erroRpc } = await supabasePublico.rpc(
-      "obter_contexto_ponto_por_token",
-      { _token: data.token },
-    );
-    if (erroRpc) {
-      console.error("[Ponto público] Falha ao consultar o contexto do QR Code:", erroRpc);
-    } else if (contextoPublico !== null) {
-      const rpcContexto = contextoPontoRpcSchema.parse(contextoPublico);
-      if (rpcContexto?.evento) {
-        const expiraEm = validarValidadeQr(rpcContexto.evento);
-        return {
-          pontoBasico: rpcContexto.pontoBasico ?? false,
-          evento: {
-            ...rpcContexto.evento,
-            qr_code_expira_em: expiraEm,
-          },
-          exigeSelfie: rpcContexto.exigeSelfie ?? false,
-          exigeGps: rpcContexto.exigeGps ?? false,
-        };
-      }
-    }
-
-    if (!erroRpc && contextoPublico === null) {
-      throw new Error(
-        "QR Code inválido ou expirado. Peça ao supervisor para gerar um novo código.",
-      );
-    }
-
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: evento, error: erroEvento } = await supabaseAdmin
-      .from("eventos")
-      .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em")
-      .eq("qr_code_token", data.token)
-      .maybeSingle();
-    if (erroEvento) {
-      console.error("[Ponto público] Falha ao consultar o evento do QR Code:", erroEvento);
-      throw new Error(`Não foi possível consultar este QR Code: ${erroEvento.message}`);
-    }
-
-    if (!evento) {
-      throw new Error("QR Code inválido ou expirado.");
-    }
-    const expiraEm = validarValidadeQr(evento);
-
-    const { data: config, error: erroConfig } = await supabaseAdmin
-      .from("configuracoes")
-      .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
-      .eq("empresa_id", evento.empresa_id)
-      .maybeSingle();
-    if (erroConfig)
-      throw new Error(`Não foi possível carregar as configurações de ponto: ${erroConfig.message}`);
-
-    const { data: plano, error: erroPlano } = await supabaseAdmin.rpc("plano_da_empresa", {
-      _empresa_id: evento.empresa_id,
-    });
-    if (erroPlano)
-      throw new Error(`Não foi possível consultar o plano da agência: ${erroPlano.message}`);
-
-    return {
-      pontoBasico: plano?.codigo === "free",
-      evento: {
-        nome: evento.nome,
-        local: evento.local,
-        status: evento.status,
-        data_inicio: evento.data_inicio,
-        data_fim: evento.data_fim,
-        qr_code_expira_em: expiraEm,
-      },
-      exigeSelfie: config?.checkin_exige_selfie ?? false,
-      exigeGps: config?.checkin_exige_gps ?? false,
-    };
-  });
-
-async function localizarEscala(token: string, cpf: string) {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data: evento, error: erroEvento } = await supabaseAdmin
-    .from("eventos")
-    .select("id, empresa_id, status, data_fim, qr_code_expira_em")
-    .eq("qr_code_token", token)
-    .maybeSingle();
-  if (erroEvento) {
-    console.error("[Ponto público] Falha ao localizar evento para registro:", erroEvento);
-    throw new Error(`Não foi possível localizar o evento do QR Code: ${erroEvento.message}`);
-  }
-
-  if (!evento) {
-    throw new Error("QR Code inválido.");
-  }
-  validarValidadeQr(evento);
-
-  const { data: freelancer, error: erroFreelancer } = await supabaseAdmin
-    .from("freelancers")
-    .select("id, nome")
-    .eq("empresa_id", evento.empresa_id)
-    .eq("cpf", cpf)
-    .maybeSingle();
-  if (erroFreelancer) {
-    console.error("[Ponto público] Falha ao localizar colaborador:", erroFreelancer);
-    throw new Error(`Não foi possível localizar o colaborador: ${erroFreelancer.message}`);
-  }
-  if (!freelancer) throw new Error("CPF não encontrado nesta agência.");
-
-  const { data: equipes, error: erroEquipes } = await supabaseAdmin
-    .from("equipes")
-    .select("id")
-    .eq("evento_id", evento.id);
-  if (erroEquipes) {
-    console.error("[Ponto público] Falha ao localizar equipe do evento:", erroEquipes);
-    throw new Error(`Não foi possível localizar a equipe do evento: ${erroEquipes.message}`);
-  }
-  const ids = (equipes ?? []).map((q) => q.id);
-  if (ids.length === 0) throw new Error("Você não está escalado neste evento.");
-
-  const { data: escala, error: erroEscala } = await supabaseAdmin
-    .from("escalas")
-    .select("id, status")
-    .eq("freelancer_id", freelancer.id)
-    .in("equipe_id", ids)
-    .neq("status", "substituido")
-    .maybeSingle();
-  if (erroEscala) {
-    console.error("[Ponto público] Falha ao localizar escala:", erroEscala);
-    throw new Error(`Não foi possível localizar a escala: ${erroEscala.message}`);
-  }
-  if (!escala) throw new Error("Você não está escalado neste evento.");
-  if (escala.status === "recusado") throw new Error("Sua participação neste evento foi recusada.");
-
-  return { supabaseAdmin, evento, freelancer, escala };
-}
-
-/** Identifica o freelancer pelo CPF e devolve os pontos que ele já registrou. */
+/** Identifica o freelancer pelo CPF e devolve as marcações já registradas. */
 export const identificarNoPonto = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
-  .handler(async ({ data }) => {
-    const tentativa = await limitarTentativas(data.token, data.cpf, "identificacao");
-    let localizado: Awaited<ReturnType<typeof localizarEscala>>;
-    try {
-      localizado = await localizarEscala(data.token, data.cpf);
-      await tentativa.registrar(true);
-    } catch (error) {
-      await tentativa.registrar(false);
-      throw error;
-    }
-    const { supabaseAdmin, escala, freelancer } = localizado;
+  .handler(({ data }) =>
+    invokePontoEdge({ action: "identificar", ...data }, identificacaoResultSchema),
+  );
 
-    const { data: pontos, error: erroPontos } = await supabaseAdmin
-      .from("pontos")
-      .select("id, tipo, registrado_em, status, fora_horario")
-      .eq("escala_id", escala.id)
-      .order("registrado_em");
-    if (erroPontos)
-      throw new Error(`Não foi possível carregar as marcações: ${erroPontos.message}`);
-
-    return {
-      escalaId: escala.id,
-      statusEscala: escala.status,
-      nome: freelancer.nome,
-      pontos: pontos ?? [],
-    };
-  });
-
-/** Confirma a presença na escala a partir do próprio celular do freelancer. */
+/** Confirma a presença na escala a partir do celular do freelancer. */
 export const confirmarPresenca = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
-  .handler(async ({ data }) => {
-    const tentativa = await limitarTentativas(data.token, data.cpf, "confirmacao");
-    let localizado: Awaited<ReturnType<typeof localizarEscala>>;
-    try {
-      localizado = await localizarEscala(data.token, data.cpf);
-    } catch (error) {
-      await tentativa.registrar(false);
-      throw error;
-    }
-    const { supabaseAdmin, escala } = localizado;
-    if (escala.status !== "convidado") {
-      await tentativa.registrar(true);
-      return { ok: true };
-    }
-    const { error } = await supabaseAdmin
-      .from("escalas")
-      .update({ status: "confirmado", confirmado_em: new Date().toISOString() })
-      .eq("id", escala.id);
-    if (error) throw new Error(error.message);
-    await tentativa.registrar(true);
-    return { ok: true };
-  });
+  .handler(({ data }) =>
+    invokePontoEdge({ action: "confirmar", ...data }, z.object({ ok: z.literal(true) })),
+  );
 
-/** Registra entrada, intervalo ou saída. Fica pendente até o supervisor aprovar. */
+/** Registra entrada, intervalo ou saída. A marcação fica pendente de revisão. */
 export const registrarPonto = createServerFn({ method: "POST" })
   .validator((input: unknown) => registrarSchema.parse(input))
-  .handler(async ({ data }) => {
-    const tentativa = await limitarTentativas(data.token, data.cpf, "registro");
-    const { supabaseAdmin, evento, escala } = await localizarEscala(data.token, data.cpf);
-    if (escala.id !== data.escalaId) throw new Error("Escala inválida.");
-
-    const { data: config, error: erroConfig } = await supabaseAdmin
-      .from("configuracoes")
-      .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
-      .eq("empresa_id", evento.empresa_id)
-      .maybeSingle();
-    if (erroConfig)
-      throw new Error(`Não foi possível carregar as configurações de ponto: ${erroConfig.message}`);
-
-    if (config?.checkin_exige_selfie && !data.fotoBase64)
-      throw new Error("Esta agência exige selfie no registro de ponto.");
-    if (config?.checkin_exige_selfie && !data.consentiuSelfie)
-      throw new Error("Confirme o uso da selfie para revisão do registro.");
-    if (config?.checkin_exige_gps && (data.lat == null || data.lng == null))
-      throw new Error("Esta agência exige a localização no registro de ponto.");
-
-    let fotoUrl: string | null = null;
-    if (data.fotoBase64) {
-      const base64 = data.fotoBase64.split(",").pop() ?? "";
-      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-      const caminho = `${evento.empresa_id}/${escala.id}/${crypto.randomUUID()}.jpg`;
-      const { error: erroUpload } = await supabaseAdmin.storage
-        .from("selfies-ponto")
-        .upload(caminho, bytes, { contentType: "image/jpeg" });
-      if (erroUpload) throw new Error(erroUpload.message);
-      fotoUrl = caminho;
-    }
-
-    const { data: existentes, error: erroExistentes } = await supabaseAdmin
-      .from("pontos")
-      .select("tipo")
-      .eq("escala_id", escala.id)
-      .neq("status", "recusado")
-      .order("registrado_em");
-    if (erroExistentes)
-      throw new Error(`Não foi possível validar a ordem das marcações: ${erroExistentes.message}`);
-    const { data: plano, error: erroPlano } = await supabaseAdmin.rpc("plano_da_empresa", {
-      _empresa_id: evento.empresa_id,
-    });
-    if (erroPlano) throw new Error("Não foi possível verificar o plano.");
-    const sequencia = plano?.codigo === "free" ? ["entrada", "saida"] : SEQUENCIA;
-    const esperado = sequencia[(existentes ?? []).length];
-    if (!esperado) throw new Error("Todos os registros desta escala já foram concluídos.");
-    if (data.tipo !== esperado) {
-      throw new Error(`O próximo registro deve ser ${esperado.replaceAll("_", " ")}.`);
-    }
-
-    const agora = new Date();
-    const foraHorario = Boolean(evento.data_fim && agora > new Date(evento.data_fim));
-    const retencaoDias = Math.min(
-      config?.selfie_retencao_dias ?? 90,
-      plano?.retencao_evidencias_dias ?? 365,
-    );
-    const selfieExpiraEm = data.fotoBase64
-      ? new Date(agora.getTime() + retencaoDias * 24 * 60 * 60_000).toISOString()
-      : null;
-    const { data: ponto, error } = await supabaseAdmin
-      .from("pontos")
-      .insert({
-        escala_id: escala.id,
-        tipo: data.tipo,
-        metodo: data.fotoBase64 ? "selfie" : "qrcode",
-        registrado_em: agora.toISOString(),
-        foto_url: fotoUrl,
-        gps_lat: data.lat ?? null,
-        gps_lng: data.lng ?? null,
-        status: "pendente",
-        fora_horario: foraHorario,
-        selfie_consentimento_aceito_em: data.fotoBase64 ? agora.toISOString() : null,
-        selfie_expira_em: selfieExpiraEm,
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-
-    const { error: erroAuditoria } = await supabaseAdmin.from("auditoria_ponto_publico").insert({
-      empresa_id: evento.empresa_id,
-      escala_id: escala.id,
-      ponto_id: ponto.id,
-      acao: "ponto_registrado",
-      resultado: "sucesso",
-      detalhes: {
-        tipo: data.tipo,
-        fora_horario: foraHorario,
-        com_selfie: Boolean(data.fotoBase64),
-      },
-    });
-    if (erroAuditoria) {
-      console.error("[Ponto público] Falha ao auditar a marcação:", erroAuditoria);
-      throw new Error(
-        `A marcação foi registrada, mas a auditoria falhou: ${erroAuditoria.message}`,
-      );
-    }
-    await tentativa.registrar(true);
-
-    return { ok: true, foraHorario };
-  });
+  .handler(({ data }) =>
+    invokePontoEdge(
+      { action: "registrar", ...data },
+      z.object({ ok: z.literal(true), foraHorario: z.boolean() }),
+    ),
+  );

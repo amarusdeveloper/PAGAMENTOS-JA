@@ -145,8 +145,18 @@ npm run build
    - `ASAAS_API_KEY`: _(sua chave de API de produção do Asaas)_
    - `ASAAS_AMBIENTE`: `producao`
    - `ASAAS_WEBHOOK_TOKEN`: _(seu token de validação de webhook)_
-4. Execute `supabase/migrations/20261027_ponto_publico_policies.sql` no SQL Editor do projeto Supabase caso as migrações não sejam aplicadas automaticamente.
-5. Garanta que `SUPABASE_SERVICE_ROLE_KEY` esteja habilitada para **Production** e faça um novo deploy após alterar variáveis de ambiente.
+4. Execute as migrações SQL pendentes no projeto Supabase.
+5. Publique a Edge Function do ponto usando a CLI:
+
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref rutmjtmirwcyoroyjqdy
+   npx supabase functions deploy ponto-publico
+   ```
+
+   A função usa `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` do ambiente protegido do Supabase. A chamada pública não exige JWT de usuário; os registros continuam validados e gravados no servidor.
+
+6. Faça um novo deploy da aplicação Vercel para publicar o cliente que chama a Edge Function. Essa alteração remove a dependência da chave administrativa no fluxo público de ponto; outros recursos do sistema que usam operações administrativas ainda podem depender de `SUPABASE_SERVICE_ROLE_KEY` na Vercel.
 
 ---
 

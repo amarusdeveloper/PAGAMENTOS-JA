@@ -1,1 +1,4 @@
 project_id = "rutmjtmirwcyoroyjqdy"
+
+[functions.ponto-publico]
+verify_jwt = false
