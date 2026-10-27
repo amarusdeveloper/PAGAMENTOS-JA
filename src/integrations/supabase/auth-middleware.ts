@@ -35,17 +35,12 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 
 export const requireSupabaseAuth = createMiddleware({ type: "function" }).server(
   async ({ next }) => {
-    const rawUrl = process.env["SUPABASE_URL"];
-    const SUPABASE_URL =
-      rawUrl && !rawUrl.includes("rutmjtmirwcyoroyjqdy")
-        ? rawUrl
-        : "https://vqkpirqipvigyqxdanau.supabase.co";
+    const rawUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"];
+    const SUPABASE_URL = rawUrl || "https://rutmjtmirwcyoroyjqdy.supabase.co";
 
-    const rawKey = process.env["SUPABASE_PUBLISHABLE_KEY"];
-    const SUPABASE_PUBLISHABLE_KEY =
-      rawKey && !rawKey.includes("sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf")
-        ? rawKey
-        : "sb_publishable_kSrIm2-vOW0quRfq-3KMRQ_s7sBRze9";
+    const rawKey =
+      process.env["SUPABASE_PUBLISHABLE_KEY"] || process.env["VITE_SUPABASE_PUBLISHABLE_KEY"];
+    const SUPABASE_PUBLISHABLE_KEY = rawKey || "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
 
     if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
       const missing = [
@@ -96,22 +91,35 @@ export const requireSupabaseAuth = createMiddleware({ type: "function" }).server
       },
     });
 
-    const { data, error } = await supabase.auth.getClaims(token);
-    if (error || !data?.claims) {
-      throw new Error("Unauthorized: Invalid token");
+    let userId = "";
+    let claims: Record<string, unknown> | null = null;
+
+    const { data: claimsData, error: claimsError } = await supabase.auth.getClaims(token);
+    if (!claimsError && claimsData?.claims?.sub) {
+      userId = claimsData.claims.sub;
+      claims = claimsData.claims as Record<string, unknown>;
+    } else {
+      // Fallback via getUser endpoint
+      const { data: userData, error: userError } = await supabase.auth.getUser(token);
+      if (userError || !userData?.user?.id) {
+        console.error("[Supabase Auth] Token verification failed:", claimsError || userError);
+        throw new Error("Unauthorized: Invalid token");
+      }
+      userId = userData.user.id;
+      claims = { sub: userId, email: userData.user.email };
     }
 
-    if (!data.claims.sub) {
+    if (!userId) {
       throw new Error("Unauthorized: No user ID found in token");
     }
 
-    const contexto = await resolveContextoAutorizacao(supabase, data.claims.sub);
+    const contexto = await resolveContextoAutorizacao(supabase, userId);
 
     return next({
       context: {
         supabase,
-        userId: data.claims.sub,
-        claims: data.claims,
+        userId,
+        claims,
         contexto,
       },
     });
