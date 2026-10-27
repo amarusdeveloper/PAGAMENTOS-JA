@@ -113,11 +113,22 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
     const contexto = await requireCapability(context.supabase, context.userId, "eventos.gerenciar");
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-    const { data: evento } = await supabaseAdmin
+    // Tenta primeiro com context.supabase (autenticado com RLS da agência)
+    const { data: eventoAuth } = await context.supabase
       .from("eventos")
       .select("empresa_id, data_fim, status")
       .eq("id", data.eventoId)
       .maybeSingle();
+
+    let evento = eventoAuth;
+    if (!evento) {
+      const { data: eventoAdmin } = await supabaseAdmin
+        .from("eventos")
+        .select("empresa_id, data_fim, status")
+        .eq("id", data.eventoId)
+        .maybeSingle();
+      evento = eventoAdmin;
+    }
 
     if (!evento || evento.empresa_id !== contexto.empresaId) {
       throw new Error("Evento não encontrado.");
@@ -139,7 +150,8 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
     const expiraEm = dataFinalExpira.toISOString();
     const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
 
-    const { error } = await supabaseAdmin
+    // Atualiza prioritariamente via context.supabase com fallback para supabaseAdmin
+    const { error: erroUpdateAuth } = await context.supabase
       .from("eventos")
       .update({
         qr_code_token: token,
@@ -148,11 +160,22 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
       })
       .eq("id", data.eventoId);
 
-    if (error) {
-      throw new Error(`Falha ao atualizar QR Code do evento: ${error.message}`);
+    if (erroUpdateAuth) {
+      const { error: erroUpdateAdmin } = await supabaseAdmin
+        .from("eventos")
+        .update({
+          qr_code_token: token,
+          qr_code_gerado_em: geradoEm.toISOString(),
+          qr_code_expira_em: expiraEm,
+        })
+        .eq("id", data.eventoId);
+
+      if (erroUpdateAdmin) {
+        throw new Error(`Falha ao atualizar QR Code do evento: ${erroUpdateAuth.message}`);
+      }
     }
 
-    await supabaseAdmin.from("logs_auditoria").insert({
+    const logPayload = {
       empresa_id: evento.empresa_id,
       ator_id: context.userId,
       ator_contexto: "organizacao",
@@ -164,7 +187,14 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
         token_gerado: token.slice(0, 8) + "...",
         expira_em: expiraEm,
       },
-    });
+    };
+
+    await context.supabase
+      .from("logs_auditoria")
+      .insert(logPayload)
+      .catch(async () => {
+        await supabaseAdmin.from("logs_auditoria").insert(logPayload);
+      });
 
     return { ok: true, token, expiraEm };
   });

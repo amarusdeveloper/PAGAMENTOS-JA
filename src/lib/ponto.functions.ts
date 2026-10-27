@@ -43,13 +43,17 @@ async function limitarTentativas(token: string, cpf: string | null, acao: string
     throw new Error("Muitas tentativas. Aguarde 10 minutos e tente novamente.");
   }
   const registrar = async (sucesso: boolean) => {
-    await supabaseAdmin.from("tentativas_ponto_publico").insert({
-      token_hash: tokenHash,
-      cpf_hash: cpfHash,
-      ip_hash: ipHash,
-      acao,
-      sucesso,
-    });
+    try {
+      await supabaseAdmin.from("tentativas_ponto_publico").insert({
+        token_hash: tokenHash,
+        cpf_hash: cpfHash,
+        ip_hash: ipHash,
+        acao,
+        sucesso,
+      });
+    } catch {
+      // Falha não-bloqueante de telemetria caso a tabela ou chave service_role esteja indisponível
+    }
   };
   return { registrar };
 }
@@ -92,24 +96,86 @@ export const obterContextoPonto = createServerFn({ method: "GET" })
   .validator((input: unknown) => tokenSchema.parse(input))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { data: evento } = await supabaseAdmin
-      .from("eventos")
-      .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em")
-      .eq("qr_code_token", data.token)
-      .maybeSingle();
+    const { getRequestHeader } = await import("@tanstack/start-server-core");
+    const { createClient } = await import("@supabase/supabase-js");
 
-    if (!evento) throw new Error("QR Code inválido.");
+    const authHeader = getRequestHeader("authorization");
+    let evento = null;
+    let clientUtilizado = supabaseAdmin;
+
+    // Tenta primeiro via RPC pública com SECURITY DEFINER se existir no banco
+    const { data: rpcContexto } = await supabaseAdmin
+      .rpc("obter_contexto_ponto_por_token", { _token: data.token })
+      .catch(() => ({ data: null }));
+
+    if (rpcContexto?.evento) {
+      const expiraEm = validarValidadeQr(rpcContexto.evento);
+      return {
+        ...rpcContexto,
+        evento: {
+          ...rpcContexto.evento,
+          qr_code_expira_em: expiraEm,
+        },
+      };
+    }
+
+    // Se o requisitante possuir um token JWT (ex.: supervisor testando do navegador), usa-o
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const rawUrl =
+        process.env["SUPABASE_URL"] ||
+        process.env["VITE_SUPABASE_URL"] ||
+        "https://rutmjtmirwcyoroyjqdy.supabase.co";
+      const rawKey =
+        process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+        process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+        "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
+      const userClient = createClient(rawUrl, rawKey, {
+        global: { headers: { Authorization: authHeader } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data: evAuth } = await userClient
+        .from("eventos")
+        .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em")
+        .eq("qr_code_token", data.token)
+        .maybeSingle();
+      if (evAuth) {
+        evento = evAuth;
+        clientUtilizado = userClient as unknown as typeof supabaseAdmin;
+      }
+    }
+
+    if (!evento) {
+      const { data: evAdmin } = await supabaseAdmin
+        .from("eventos")
+        .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em")
+        .eq("qr_code_token", data.token)
+        .maybeSingle();
+      evento = evAdmin;
+    }
+
+    if (!evento) {
+      if (!process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+        throw new Error(
+          "Configuração de servidor incompleta: variável SUPABASE_SERVICE_ROLE_KEY ausente no painel da Vercel. Adicione a chave service_role do Supabase nas configurações de ambiente da Vercel para permitir a leitura pública do QR Code.",
+        );
+      }
+      throw new Error("QR Code inválido ou expirado.");
+    }
     const expiraEm = validarValidadeQr(evento);
 
-    const { data: config } = await supabaseAdmin
+    const { data: config } = await clientUtilizado
       .from("configuracoes")
       .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
       .eq("empresa_id", evento.empresa_id)
-      .maybeSingle();
+      .maybeSingle()
+      .catch(() => ({ data: null }));
 
-    const { data: plano } = await supabaseAdmin.rpc("plano_da_empresa", {
-      _empresa_id: evento.empresa_id,
-    });
+    const { data: plano } = await clientUtilizado
+      .rpc("plano_da_empresa", {
+        _empresa_id: evento.empresa_id,
+      })
+      .catch(() => ({ data: null }));
+
     return {
       pontoBasico: plano?.codigo === "free",
       evento: {
@@ -127,16 +193,57 @@ export const obterContextoPonto = createServerFn({ method: "GET" })
 
 async function localizarEscala(token: string, cpf: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { getRequestHeader } = await import("@tanstack/start-server-core");
+  const { createClient } = await import("@supabase/supabase-js");
 
-  const { data: evento } = await supabaseAdmin
-    .from("eventos")
-    .select("id, empresa_id, status, data_fim, qr_code_expira_em")
-    .eq("qr_code_token", token)
-    .maybeSingle();
-  if (!evento) throw new Error("QR Code inválido.");
+  const authHeader = getRequestHeader("authorization");
+  let dbClient = supabaseAdmin;
+  let evento = null;
+
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const rawUrl =
+      process.env["SUPABASE_URL"] ||
+      process.env["VITE_SUPABASE_URL"] ||
+      "https://rutmjtmirwcyoroyjqdy.supabase.co";
+    const rawKey =
+      process.env["SUPABASE_PUBLISHABLE_KEY"] ||
+      process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+      "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
+    const userClient = createClient(rawUrl, rawKey, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: evAuth } = await userClient
+      .from("eventos")
+      .select("id, empresa_id, status, data_fim, qr_code_expira_em")
+      .eq("qr_code_token", token)
+      .maybeSingle();
+    if (evAuth) {
+      evento = evAuth;
+      dbClient = userClient as unknown as typeof supabaseAdmin;
+    }
+  }
+
+  if (!evento) {
+    const { data: evAdmin } = await supabaseAdmin
+      .from("eventos")
+      .select("id, empresa_id, status, data_fim, qr_code_expira_em")
+      .eq("qr_code_token", token)
+      .maybeSingle();
+    evento = evAdmin;
+  }
+
+  if (!evento) {
+    if (!process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
+      throw new Error(
+        "Configuração de servidor incompleta: variável SUPABASE_SERVICE_ROLE_KEY ausente no painel da Vercel. Adicione a chave service_role do Supabase nas configurações de ambiente da Vercel para permitir o registro de ponto.",
+      );
+    }
+    throw new Error("QR Code inválido.");
+  }
   validarValidadeQr(evento);
 
-  const { data: freelancer } = await supabaseAdmin
+  const { data: freelancer } = await dbClient
     .from("freelancers")
     .select("id, nome")
     .eq("empresa_id", evento.empresa_id)
@@ -144,14 +251,11 @@ async function localizarEscala(token: string, cpf: string) {
     .maybeSingle();
   if (!freelancer) throw new Error("CPF não encontrado nesta agência.");
 
-  const { data: equipes } = await supabaseAdmin
-    .from("equipes")
-    .select("id")
-    .eq("evento_id", evento.id);
+  const { data: equipes } = await dbClient.from("equipes").select("id").eq("evento_id", evento.id);
   const ids = (equipes ?? []).map((q) => q.id);
   if (ids.length === 0) throw new Error("Você não está escalado neste evento.");
 
-  const { data: escala } = await supabaseAdmin
+  const { data: escala } = await dbClient
     .from("escalas")
     .select("id, status")
     .eq("freelancer_id", freelancer.id)
@@ -161,7 +265,7 @@ async function localizarEscala(token: string, cpf: string) {
   if (!escala) throw new Error("Você não está escalado neste evento.");
   if (escala.status === "recusado") throw new Error("Sua participação neste evento foi recusada.");
 
-  return { supabaseAdmin, evento, freelancer, escala };
+  return { supabaseAdmin: dbClient, evento, freelancer, escala };
 }
 
 /** Identifica o freelancer pelo CPF e devolve os pontos que ele já registrou. */

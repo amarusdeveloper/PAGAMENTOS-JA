@@ -75,28 +75,82 @@ export const carregarCobranca = createServerFn({ method: "GET" })
 
     try {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const client = context.supabase;
 
       // Garante que o ciclo de cobrança esteja aberto
-      const abertura = await supabaseAdmin.rpc("abrir_ciclo_cobranca", {
+      let abertura = await client.rpc("abrir_ciclo_cobranca", {
         _empresa_id: empresaId,
       });
+      if (abertura.error) {
+        abertura = await supabaseAdmin.rpc("abrir_ciclo_cobranca", {
+          _empresa_id: empresaId,
+        });
+      }
 
       const [uso, ciclo, faturas, planos, taxas] = await Promise.all([
-        supabaseAdmin.rpc("resumo_uso_empresa", { _empresa_id: empresaId }),
+        client.rpc("resumo_uso_empresa", { _empresa_id: empresaId }).then(async (r) => {
+          if (r.error || !r.data)
+            return supabaseAdmin.rpc("resumo_uso_empresa", { _empresa_id: empresaId });
+          return r;
+        }),
         abertura.data
-          ? supabaseAdmin.from("ciclos_cobranca").select("*").eq("id", abertura.data).maybeSingle()
+          ? client
+              .from("ciclos_cobranca")
+              .select("*")
+              .eq("id", abertura.data)
+              .maybeSingle()
+              .then(async (r) => {
+                if (r.error || !r.data) {
+                  return supabaseAdmin
+                    .from("ciclos_cobranca")
+                    .select("*")
+                    .eq("id", abertura.data)
+                    .maybeSingle();
+                }
+                return r;
+              })
           : Promise.resolve({ data: null, error: null }),
-        supabaseAdmin
+        client
           .from("faturas_plataforma")
           .select("*")
           .eq("empresa_id", empresaId)
-          .order("ciclo_inicio", { ascending: false }),
-        supabaseAdmin.from("planos").select("*").eq("ativo", true).order("ordem"),
-        supabaseAdmin.from("taxas_meio_pagamento").select("*").eq("ativo", true),
+          .order("ciclo_inicio", { ascending: false })
+          .then(async (r) => {
+            if (r.error) {
+              return supabaseAdmin
+                .from("faturas_plataforma")
+                .select("*")
+                .eq("empresa_id", empresaId)
+                .order("ciclo_inicio", { ascending: false });
+            }
+            return r;
+          }),
+        client
+          .from("planos")
+          .select("*")
+          .eq("ativo", true)
+          .order("ordem")
+          .then(async (r) => {
+            if (r.error || !r.data?.length) {
+              return supabaseAdmin.from("planos").select("*").eq("ativo", true).order("ordem");
+            }
+            return r;
+          }),
+        client
+          .from("taxas_meio_pagamento")
+          .select("*")
+          .eq("ativo", true)
+          .then(async (r) => {
+            if (r.error) {
+              return supabaseAdmin.from("taxas_meio_pagamento").select("*").eq("ativo", true);
+            }
+            return r;
+          }),
       ]);
 
       const resumo = uso.data?.[0];
-      const listaPlanos = planos.data ?? [];
+      const listaPlanos =
+        (planos.data && planos.data.length > 0 ? planos.data : planosFinais) ?? [];
 
       if (!resumo || !ciclo?.data) {
         return fallbackRetorno(listaPlanos);
@@ -149,28 +203,48 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     if (!empresaId) throw new Error("Agência não identificada.");
 
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const client = context.supabase;
 
     // Valida se o plano existe e está ativo
-    const { data: plano, error: planoErro } = await supabaseAdmin
+    let { data: plano } = await client
       .from("planos")
       .select("*")
       .eq("id", data.planoId)
       .eq("ativo", true)
       .maybeSingle();
 
-    if (planoErro || !plano) {
+    if (!plano) {
+      const resAdmin = await supabaseAdmin
+        .from("planos")
+        .select("*")
+        .eq("id", data.planoId)
+        .eq("ativo", true)
+        .maybeSingle();
+      plano = resAdmin.data;
+    }
+
+    if (!plano) {
       throw new Error("Plano selecionado não encontrado ou inativo.");
     }
 
     // Consulta assinatura existente da agência
-    const { data: assinaturaExistente } = await supabaseAdmin
+    let { data: assinaturaExistente } = await client
       .from("assinaturas")
       .select("id, plano_id, status")
       .eq("empresa_id", empresaId)
       .maybeSingle();
 
+    if (!assinaturaExistente) {
+      const resAssAdmin = await supabaseAdmin
+        .from("assinaturas")
+        .select("id, plano_id, status")
+        .eq("empresa_id", empresaId)
+        .maybeSingle();
+      assinaturaExistente = resAssAdmin.data;
+    }
+
     if (assinaturaExistente) {
-      const { error: erroUpdate } = await supabaseAdmin
+      const { error: erroUpdate } = await client
         .from("assinaturas")
         .update({
           plano_id: plano.id,
@@ -179,22 +253,41 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         })
         .eq("id", assinaturaExistente.id);
 
-      if (erroUpdate) throw new Error(erroUpdate.message);
+      if (erroUpdate) {
+        const { error: erroAdmin } = await supabaseAdmin
+          .from("assinaturas")
+          .update({
+            plano_id: plano.id,
+            status: "ativa",
+            atualizado_em: new Date().toISOString(),
+          })
+          .eq("id", assinaturaExistente.id);
+        if (erroAdmin) throw new Error(erroAdmin.message);
+      }
     } else {
-      const { error: erroInsert } = await supabaseAdmin.from("assinaturas").insert({
+      const { error: erroInsert } = await client.from("assinaturas").insert({
         empresa_id: empresaId,
         plano_id: plano.id,
         status: "ativa",
       });
 
-      if (erroInsert) throw new Error(erroInsert.message);
+      if (erroInsert) {
+        const { error: erroAdmin } = await supabaseAdmin.from("assinaturas").insert({
+          empresa_id: empresaId,
+          plano_id: plano.id,
+          status: "ativa",
+        });
+        if (erroAdmin) throw new Error(erroAdmin.message);
+      }
     }
 
     // Abre novo ciclo com o plano escolhido
-    await supabaseAdmin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
+    await client.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId }).catch(async () => {
+      await supabaseAdmin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
+    });
 
     // Registra log de auditoria
-    await supabaseAdmin.from("logs_auditoria").insert({
+    const auditPayload = {
       empresa_id: empresaId,
       ator_id: context.userId,
       ator_contexto: "organizacao",
@@ -203,11 +296,17 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       recurso_id: plano.id,
       resultado: "sucesso",
       detalhes: {
-        novo_plano: plano.nome,
+        plano_id: plano.id,
+        plano_nome: plano.nome,
         mensalidade: plano.mensalidade,
-        participacoes_incluidas: plano.participacoes_incluidas,
       },
-    });
+    };
+    await client
+      .from("logs_auditoria")
+      .insert(auditPayload)
+      .catch(async () => {
+        await supabaseAdmin.from("logs_auditoria").insert(auditPayload);
+      });
 
     return { ok: true, planoNome: plano.nome };
   });
