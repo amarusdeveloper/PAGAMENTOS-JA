@@ -43,49 +43,26 @@ CREATE TABLE IF NOT EXISTS public.auditoria_ponto_publico (
 ALTER TABLE public.tentativas_ponto_publico ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.auditoria_ponto_publico ENABLE ROW LEVEL SECURITY;
 
--- 3. Concede permissões essenciais para os perfis
+-- 3. Mantém as tabelas de auditoria acessíveis apenas pelo servidor.
 GRANT ALL ON public.tentativas_ponto_publico TO service_role, postgres;
 GRANT ALL ON public.auditoria_ponto_publico TO service_role, postgres;
 GRANT SELECT ON public.auditoria_ponto_publico TO authenticated;
 
--- Permissões para anon (público / celular do colaborador)
-GRANT SELECT ON public.eventos TO anon;
-GRANT SELECT ON public.configuracoes TO anon;
-GRANT SELECT ON public.equipes TO anon;
-GRANT SELECT ON public.freelancers TO anon;
-GRANT SELECT ON public.escalas TO anon;
-GRANT SELECT, INSERT ON public.pontos TO anon;
-GRANT SELECT, INSERT ON public.tentativas_ponto_publico TO anon;
-GRANT SELECT, INSERT ON public.auditoria_ponto_publico TO anon;
-
--- 4. Políticas RLS para leitura pública do evento via token do QR Code
+-- Reverte permissões públicas amplas concedidas por versões anteriores deste script.
+REVOKE ALL ON public.eventos, public.configuracoes, public.equipes,
+  public.freelancers, public.escalas, public.pontos,
+  public.tentativas_ponto_publico, public.auditoria_ponto_publico FROM anon;
 DROP POLICY IF EXISTS "eventos_leitura_publica_por_qr" ON public.eventos;
-CREATE POLICY "eventos_leitura_publica_por_qr" ON public.eventos
-  FOR SELECT TO anon
-  USING (qr_code_token IS NOT NULL);
-
 DROP POLICY IF EXISTS "configuracoes_leitura_publica" ON public.configuracoes;
-CREATE POLICY "configuracoes_leitura_publica" ON public.configuracoes
-  FOR SELECT TO anon
-  USING (true);
-
 DROP POLICY IF EXISTS "tentativas_ponto_anon_insert" ON public.tentativas_ponto_publico;
-CREATE POLICY "tentativas_ponto_anon_insert" ON public.tentativas_ponto_publico
-  FOR ALL TO anon
-  USING (true)
-  WITH CHECK (true);
-
 DROP POLICY IF EXISTS "auditoria_ponto_anon_insert" ON public.auditoria_ponto_publico;
-CREATE POLICY "auditoria_ponto_anon_insert" ON public.auditoria_ponto_publico
-  FOR INSERT TO anon
-  WITH CHECK (true);
 
--- 5. Função RPC segura com SECURITY DEFINER para ler os dados do evento sem expor dados sensíveis
+-- 4. RPC segura para ler somente o contexto mínimo de um QR Code.
 CREATE OR REPLACE FUNCTION public.obter_contexto_ponto_por_token(_token text)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = pg_catalog, public
 AS $$
 DECLARE
   v_evento record;
@@ -129,4 +106,5 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.obter_contexto_ponto_por_token(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.obter_contexto_ponto_por_token(text) TO anon, authenticated, service_role;

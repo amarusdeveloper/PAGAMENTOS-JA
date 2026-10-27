@@ -18,6 +18,25 @@ const registrarSchema = identificarSchema.extend({
 
 const SEQUENCIA = ["entrada", "inicio_intervalo", "fim_intervalo", "saida"] as const;
 
+const contextoPontoRpcSchema = z
+  .object({
+    pontoBasico: z.boolean().optional(),
+    evento: z
+      .object({
+        id: z.string().optional(),
+        nome: z.string(),
+        local: z.string().nullable(),
+        status: z.string().nullable(),
+        data_inicio: z.string(),
+        data_fim: z.string().nullable(),
+        qr_code_expira_em: z.string().nullable(),
+      })
+      .nullable(),
+    exigeSelfie: z.boolean().optional(),
+    exigeGps: z.boolean().optional(),
+  })
+  .nullable();
+
 async function limitarTentativas(token: string, cpf: string | null, acao: string) {
   const { createHash } = await import("node:crypto");
   const { getRequestHeader } = await import("@tanstack/start-server-core");
@@ -33,26 +52,30 @@ async function limitarTentativas(token: string, cpf: string | null, acao: string
   const tokenHash = hash(token);
   const cpfHash = cpf ? hash(cpf) : null;
   const ipHash = hash(enderecoDaRequisicao());
-  const { count } = await supabaseAdmin
+  const { count, error: erroContagem } = await supabaseAdmin
     .from("tentativas_ponto_publico")
     .select("id", { count: "exact", head: true })
     .eq("token_hash", tokenHash)
     .eq("ip_hash", ipHash)
     .gte("criado_em", desde);
+  if (erroContagem) {
+    console.error("[Ponto público] Falha ao verificar o limite de tentativas:", erroContagem);
+    throw new Error(`Não foi possível validar tentativas do ponto: ${erroContagem.message}`);
+  }
   if ((count ?? 0) >= 20) {
     throw new Error("Muitas tentativas. Aguarde 10 minutos e tente novamente.");
   }
   const registrar = async (sucesso: boolean) => {
-    try {
-      await supabaseAdmin.from("tentativas_ponto_publico").insert({
-        token_hash: tokenHash,
-        cpf_hash: cpfHash,
-        ip_hash: ipHash,
-        acao,
-        sucesso,
-      });
-    } catch {
-      // Falha não-bloqueante de telemetria caso a tabela ou chave service_role esteja indisponível
+    const { error } = await supabaseAdmin.from("tentativas_ponto_publico").insert({
+      token_hash: tokenHash,
+      cpf_hash: cpfHash,
+      ip_hash: ipHash,
+      acao,
+      sucesso,
+    });
+    if (error) {
+      console.error("[Ponto público] Falha ao registrar auditoria de tentativa:", error);
+      throw new Error(`Não foi possível auditar a tentativa do ponto: ${error.message}`);
     }
   };
   return { registrar };
@@ -95,121 +118,66 @@ function validarValidadeQr(evento: {
 export const obterContextoPonto = createServerFn({ method: "GET" })
   .validator((input: unknown) => tokenSchema.parse(input))
   .handler(async ({ data }) => {
+    const { createSupabasePublicClient } = await import("@/integrations/supabase/public.server");
+    const supabasePublico = createSupabasePublicClient();
+
+    const { data: contextoPublico, error: erroRpc } = await supabasePublico.rpc(
+      "obter_contexto_ponto_por_token",
+      { _token: data.token },
+    );
+    if (erroRpc) {
+      console.error("[Ponto público] Falha ao consultar o contexto do QR Code:", erroRpc);
+    } else if (contextoPublico !== null) {
+      const rpcContexto = contextoPontoRpcSchema.parse(contextoPublico);
+      if (rpcContexto?.evento) {
+        const expiraEm = validarValidadeQr(rpcContexto.evento);
+        return {
+          pontoBasico: rpcContexto.pontoBasico ?? false,
+          evento: {
+            ...rpcContexto.evento,
+            qr_code_expira_em: expiraEm,
+          },
+          exigeSelfie: rpcContexto.exigeSelfie ?? false,
+          exigeGps: rpcContexto.exigeGps ?? false,
+        };
+      }
+    }
+
+    if (!erroRpc && contextoPublico === null) {
+      throw new Error(
+        "QR Code inválido ou expirado. Peça ao supervisor para gerar um novo código.",
+      );
+    }
+
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { getRequestHeader } = await import("@tanstack/start-server-core");
-    const { createClient } = await import("@supabase/supabase-js");
-
-    const authHeader = getRequestHeader("authorization");
-    let evento = null;
-    let clientUtilizado = supabaseAdmin;
-
-    // Tenta primeiro via RPC pública com SECURITY DEFINER se existir no banco
-    let rpcContexto: {
-      pontoBasico?: boolean;
-      evento?: {
-        nome: string;
-        local: string | null;
-        status: string | null;
-        data_inicio: string;
-        data_fim: string | null;
-        qr_code_expira_em: string | null;
-      } | null;
-      exigeSelfie?: boolean;
-      exigeGps?: boolean;
-    } | null = null;
-    try {
-      const resRpc = await supabaseAdmin.rpc("obter_contexto_ponto_por_token", {
-        _token: data.token,
-      });
-      if (!resRpc.error && resRpc.data) {
-        rpcContexto = resRpc.data as typeof rpcContexto;
-      }
-    } catch {
-      // Ignora erro caso a função RPC ainda não esteja carregada no cache
-    }
-
-    if (rpcContexto?.evento) {
-      const expiraEm = validarValidadeQr(rpcContexto.evento);
-      return {
-        pontoBasico: rpcContexto.pontoBasico ?? false,
-        evento: {
-          ...rpcContexto.evento,
-          qr_code_expira_em: expiraEm,
-        },
-        exigeSelfie: rpcContexto.exigeSelfie ?? false,
-        exigeGps: rpcContexto.exigeGps ?? false,
-      };
-    }
-
-    // Se o requisitante possuir um token JWT (ex.: supervisor testando do navegador), usa-o
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      const rawUrl =
-        process.env["SUPABASE_URL"] ||
-        process.env["VITE_SUPABASE_URL"] ||
-        "https://rutmjtmirwcyoroyjqdy.supabase.co";
-      const rawKey =
-        process.env["SUPABASE_PUBLISHABLE_KEY"] ||
-        process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
-        "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
-      const userClient = createClient(rawUrl, rawKey, {
-        global: { headers: { Authorization: authHeader } },
-        auth: { persistSession: false, autoRefreshToken: false },
-      });
-      const { data: evAuth } = await userClient
-        .from("eventos")
-        .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em")
-        .eq("qr_code_token", data.token)
-        .maybeSingle();
-      if (evAuth) {
-        evento = evAuth;
-        clientUtilizado = userClient as unknown as typeof supabaseAdmin;
-      }
+    const { data: evento, error: erroEvento } = await supabaseAdmin
+      .from("eventos")
+      .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em")
+      .eq("qr_code_token", data.token)
+      .maybeSingle();
+    if (erroEvento) {
+      console.error("[Ponto público] Falha ao consultar o evento do QR Code:", erroEvento);
+      throw new Error(`Não foi possível consultar este QR Code: ${erroEvento.message}`);
     }
 
     if (!evento) {
-      const { data: evAdmin } = await supabaseAdmin
-        .from("eventos")
-        .select("id, nome, local, status, empresa_id, data_inicio, data_fim, qr_code_expira_em")
-        .eq("qr_code_token", data.token)
-        .maybeSingle();
-      evento = evAdmin;
-    }
-
-    if (!evento) {
-      if (!process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
-        throw new Error(
-          "Configuração de servidor incompleta: variável SUPABASE_SERVICE_ROLE_KEY ausente no painel da Vercel. Adicione a chave service_role do Supabase nas configurações de ambiente da Vercel para permitir a leitura pública do QR Code.",
-        );
-      }
       throw new Error("QR Code inválido ou expirado.");
     }
     const expiraEm = validarValidadeQr(evento);
 
-    let config: {
-      checkin_exige_selfie?: boolean | null;
-      checkin_exige_gps?: boolean | null;
-      selfie_retencao_dias?: number | null;
-    } | null = null;
-    try {
-      const resConfig = await clientUtilizado
-        .from("configuracoes")
-        .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
-        .eq("empresa_id", evento.empresa_id)
-        .maybeSingle();
-      config = resConfig.data;
-    } catch {
-      // Ignora erro
-    }
+    const { data: config, error: erroConfig } = await supabaseAdmin
+      .from("configuracoes")
+      .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
+      .eq("empresa_id", evento.empresa_id)
+      .maybeSingle();
+    if (erroConfig)
+      throw new Error(`Não foi possível carregar as configurações de ponto: ${erroConfig.message}`);
 
-    let plano: { codigo?: string | null } | null = null;
-    try {
-      const resPlano = await clientUtilizado.rpc("plano_da_empresa", {
-        _empresa_id: evento.empresa_id,
-      });
-      plano = resPlano.data as typeof plano;
-    } catch {
-      // Ignora erro
-    }
+    const { data: plano, error: erroPlano } = await supabaseAdmin.rpc("plano_da_empresa", {
+      _empresa_id: evento.empresa_id,
+    });
+    if (erroPlano)
+      throw new Error(`Não foi possível consultar o plano da agência: ${erroPlano.message}`);
 
     return {
       pontoBasico: plano?.codigo === "free",
@@ -228,79 +196,59 @@ export const obterContextoPonto = createServerFn({ method: "GET" })
 
 async function localizarEscala(token: string, cpf: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { getRequestHeader } = await import("@tanstack/start-server-core");
-  const { createClient } = await import("@supabase/supabase-js");
-
-  const authHeader = getRequestHeader("authorization");
-  let dbClient = supabaseAdmin;
-  let evento = null;
-
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const rawUrl =
-      process.env["SUPABASE_URL"] ||
-      process.env["VITE_SUPABASE_URL"] ||
-      "https://rutmjtmirwcyoroyjqdy.supabase.co";
-    const rawKey =
-      process.env["SUPABASE_PUBLISHABLE_KEY"] ||
-      process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
-      "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
-    const userClient = createClient(rawUrl, rawKey, {
-      global: { headers: { Authorization: authHeader } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-    const { data: evAuth } = await userClient
-      .from("eventos")
-      .select("id, empresa_id, status, data_fim, qr_code_expira_em")
-      .eq("qr_code_token", token)
-      .maybeSingle();
-    if (evAuth) {
-      evento = evAuth;
-      dbClient = userClient as unknown as typeof supabaseAdmin;
-    }
+  const { data: evento, error: erroEvento } = await supabaseAdmin
+    .from("eventos")
+    .select("id, empresa_id, status, data_fim, qr_code_expira_em")
+    .eq("qr_code_token", token)
+    .maybeSingle();
+  if (erroEvento) {
+    console.error("[Ponto público] Falha ao localizar evento para registro:", erroEvento);
+    throw new Error(`Não foi possível localizar o evento do QR Code: ${erroEvento.message}`);
   }
 
   if (!evento) {
-    const { data: evAdmin } = await supabaseAdmin
-      .from("eventos")
-      .select("id, empresa_id, status, data_fim, qr_code_expira_em")
-      .eq("qr_code_token", token)
-      .maybeSingle();
-    evento = evAdmin;
-  }
-
-  if (!evento) {
-    if (!process.env["SUPABASE_SERVICE_ROLE_KEY"]) {
-      throw new Error(
-        "Configuração de servidor incompleta: variável SUPABASE_SERVICE_ROLE_KEY ausente no painel da Vercel. Adicione a chave service_role do Supabase nas configurações de ambiente da Vercel para permitir o registro de ponto.",
-      );
-    }
     throw new Error("QR Code inválido.");
   }
   validarValidadeQr(evento);
 
-  const { data: freelancer } = await dbClient
+  const { data: freelancer, error: erroFreelancer } = await supabaseAdmin
     .from("freelancers")
     .select("id, nome")
     .eq("empresa_id", evento.empresa_id)
     .eq("cpf", cpf)
     .maybeSingle();
+  if (erroFreelancer) {
+    console.error("[Ponto público] Falha ao localizar colaborador:", erroFreelancer);
+    throw new Error(`Não foi possível localizar o colaborador: ${erroFreelancer.message}`);
+  }
   if (!freelancer) throw new Error("CPF não encontrado nesta agência.");
 
-  const { data: equipes } = await dbClient.from("equipes").select("id").eq("evento_id", evento.id);
+  const { data: equipes, error: erroEquipes } = await supabaseAdmin
+    .from("equipes")
+    .select("id")
+    .eq("evento_id", evento.id);
+  if (erroEquipes) {
+    console.error("[Ponto público] Falha ao localizar equipe do evento:", erroEquipes);
+    throw new Error(`Não foi possível localizar a equipe do evento: ${erroEquipes.message}`);
+  }
   const ids = (equipes ?? []).map((q) => q.id);
   if (ids.length === 0) throw new Error("Você não está escalado neste evento.");
 
-  const { data: escala } = await dbClient
+  const { data: escala, error: erroEscala } = await supabaseAdmin
     .from("escalas")
     .select("id, status")
     .eq("freelancer_id", freelancer.id)
     .in("equipe_id", ids)
     .neq("status", "substituido")
     .maybeSingle();
+  if (erroEscala) {
+    console.error("[Ponto público] Falha ao localizar escala:", erroEscala);
+    throw new Error(`Não foi possível localizar a escala: ${erroEscala.message}`);
+  }
   if (!escala) throw new Error("Você não está escalado neste evento.");
   if (escala.status === "recusado") throw new Error("Sua participação neste evento foi recusada.");
 
-  return { supabaseAdmin: dbClient, evento, freelancer, escala };
+  return { supabaseAdmin, evento, freelancer, escala };
 }
 
 /** Identifica o freelancer pelo CPF e devolve os pontos que ele já registrou. */
@@ -318,11 +266,13 @@ export const identificarNoPonto = createServerFn({ method: "POST" })
     }
     const { supabaseAdmin, escala, freelancer } = localizado;
 
-    const { data: pontos } = await supabaseAdmin
+    const { data: pontos, error: erroPontos } = await supabaseAdmin
       .from("pontos")
       .select("id, tipo, registrado_em, status, fora_horario")
       .eq("escala_id", escala.id)
       .order("registrado_em");
+    if (erroPontos)
+      throw new Error(`Não foi possível carregar as marcações: ${erroPontos.message}`);
 
     return {
       escalaId: escala.id,
@@ -337,7 +287,14 @@ export const confirmarPresenca = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
     const tentativa = await limitarTentativas(data.token, data.cpf, "confirmacao");
-    const { supabaseAdmin, escala } = await localizarEscala(data.token, data.cpf);
+    let localizado: Awaited<ReturnType<typeof localizarEscala>>;
+    try {
+      localizado = await localizarEscala(data.token, data.cpf);
+    } catch (error) {
+      await tentativa.registrar(false);
+      throw error;
+    }
+    const { supabaseAdmin, escala } = localizado;
     if (escala.status !== "convidado") {
       await tentativa.registrar(true);
       return { ok: true };
@@ -359,11 +316,13 @@ export const registrarPonto = createServerFn({ method: "POST" })
     const { supabaseAdmin, evento, escala } = await localizarEscala(data.token, data.cpf);
     if (escala.id !== data.escalaId) throw new Error("Escala inválida.");
 
-    const { data: config } = await supabaseAdmin
+    const { data: config, error: erroConfig } = await supabaseAdmin
       .from("configuracoes")
       .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
       .eq("empresa_id", evento.empresa_id)
       .maybeSingle();
+    if (erroConfig)
+      throw new Error(`Não foi possível carregar as configurações de ponto: ${erroConfig.message}`);
 
     if (config?.checkin_exige_selfie && !data.fotoBase64)
       throw new Error("Esta agência exige selfie no registro de ponto.");
@@ -384,12 +343,14 @@ export const registrarPonto = createServerFn({ method: "POST" })
       fotoUrl = caminho;
     }
 
-    const { data: existentes } = await supabaseAdmin
+    const { data: existentes, error: erroExistentes } = await supabaseAdmin
       .from("pontos")
       .select("tipo")
       .eq("escala_id", escala.id)
       .neq("status", "recusado")
       .order("registrado_em");
+    if (erroExistentes)
+      throw new Error(`Não foi possível validar a ordem das marcações: ${erroExistentes.message}`);
     const { data: plano, error: erroPlano } = await supabaseAdmin.rpc("plano_da_empresa", {
       _empresa_id: evento.empresa_id,
     });
@@ -429,7 +390,7 @@ export const registrarPonto = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
 
-    await supabaseAdmin.from("auditoria_ponto_publico").insert({
+    const { error: erroAuditoria } = await supabaseAdmin.from("auditoria_ponto_publico").insert({
       empresa_id: evento.empresa_id,
       escala_id: escala.id,
       ponto_id: ponto.id,
@@ -441,6 +402,12 @@ export const registrarPonto = createServerFn({ method: "POST" })
         com_selfie: Boolean(data.fotoBase64),
       },
     });
+    if (erroAuditoria) {
+      console.error("[Ponto público] Falha ao auditar a marcação:", erroAuditoria);
+      throw new Error(
+        `A marcação foi registrada, mas a auditoria falhou: ${erroAuditoria.message}`,
+      );
+    }
     await tentativa.registrar(true);
 
     return { ok: true, foraHorario };

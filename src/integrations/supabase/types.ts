@@ -2339,6 +2339,7 @@ export type Database = {
     };
     Functions: {
       abrir_ciclo_cobranca: { Args: { _empresa_id: string }; Returns: string };
+      obter_contexto_ponto_por_token: { Args: { _token: string }; Returns: Json };
       ciclo_da_empresa: {
         Args: { _empresa_id: string; _ref?: string };
         Returns: {

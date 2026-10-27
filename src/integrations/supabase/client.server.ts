@@ -31,20 +31,39 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
     return fetch(input, { ...init, headers });
   };
 }
+
+function isServiceRoleKey(value: string): boolean {
+  if (value.startsWith("sb_secret_")) return true;
+
+  const payload = value.split(".")[1];
+  if (!payload) return false;
+
+  try {
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
+      role?: unknown;
+    };
+    return claims.role === "service_role";
+  } catch {
+    return false;
+  }
+}
+
 function createSupabaseAdminClient() {
   const rawUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"];
-  const SUPABASE_URL = rawUrl || "https://rutmjtmirwcyoroyjqdy.supabase.co";
+  if (!rawUrl) {
+    throw new Error("Variável SUPABASE_URL ausente na configuração do servidor.");
+  }
 
-  const rawKey =
-    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
-    process.env["SUPABASE_KEY"] ||
-    process.env["SUPABASE_PUBLISHABLE_KEY"] ||
-    process.env["VITE_SUPABASE_PUBLISHABLE_KEY"];
-  const SUPABASE_SERVICE_ROLE_KEY = rawKey || "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
+  const rawKey = process.env["SUPABASE_SERVICE_ROLE_KEY"] || process.env["SUPABASE_KEY"];
+  if (!rawKey || !isServiceRoleKey(rawKey)) {
+    throw new Error(
+      "Chave administrativa do Supabase ausente ou inválida. Configure SUPABASE_SERVICE_ROLE_KEY com a chave service_role ou sb_secret_ na Vercel e faça um novo deploy.",
+    );
+  }
 
-  return createClient<Database>(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  return createClient<Database>(rawUrl, rawKey, {
     global: {
-      fetch: createSupabaseFetch(SUPABASE_SERVICE_ROLE_KEY),
+      fetch: createSupabaseFetch(rawKey),
     },
     auth: {
       storage: undefined,

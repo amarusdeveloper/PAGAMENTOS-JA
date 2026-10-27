@@ -138,14 +138,15 @@ npm run build
    - `SUPABASE_PROJECT_ID`: `rutmjtmirwcyoroyjqdy`
    - `SUPABASE_URL`: `https://rutmjtmirwcyoroyjqdy.supabase.co`
    - `SUPABASE_PUBLISHABLE_KEY`: _(sua chave publicável Supabase)_
-   - `SUPABASE_SERVICE_ROLE_KEY`: _(sua chave service role)_
+   - `SUPABASE_SERVICE_ROLE_KEY`: _(chave `service_role` ou `sb_secret_`; somente servidor, nunca use prefixo `VITE_`)_
    - `VITE_SUPABASE_PROJECT_ID`: `rutmjtmirwcyoroyjqdy`
    - `VITE_SUPABASE_URL`: `https://rutmjtmirwcyoroyjqdy.supabase.co`
    - `VITE_SUPABASE_PUBLISHABLE_KEY`: _(sua chave publicável Supabase)_
    - `ASAAS_API_KEY`: _(sua chave de API de produção do Asaas)_
    - `ASAAS_AMBIENTE`: `producao`
    - `ASAAS_WEBHOOK_TOKEN`: _(seu token de validação de webhook)_
-4. Clique em **Deploy**.
+4. Execute `supabase/migrations/20261027_ponto_publico_policies.sql` no SQL Editor do projeto Supabase caso as migrações não sejam aplicadas automaticamente.
+5. Garanta que `SUPABASE_SERVICE_ROLE_KEY` esteja habilitada para **Production** e faça um novo deploy após alterar variáveis de ambiente.
 
 ---
 
