@@ -104,18 +104,40 @@ export const obterContextoPonto = createServerFn({ method: "GET" })
     let clientUtilizado = supabaseAdmin;
 
     // Tenta primeiro via RPC pública com SECURITY DEFINER se existir no banco
-    const { data: rpcContexto } = await supabaseAdmin
-      .rpc("obter_contexto_ponto_por_token", { _token: data.token })
-      .catch(() => ({ data: null }));
+    let rpcContexto: {
+      pontoBasico?: boolean;
+      evento?: {
+        nome: string;
+        local: string | null;
+        status: string | null;
+        data_inicio: string;
+        data_fim: string | null;
+        qr_code_expira_em: string | null;
+      } | null;
+      exigeSelfie?: boolean;
+      exigeGps?: boolean;
+    } | null = null;
+    try {
+      const resRpc = await supabaseAdmin.rpc("obter_contexto_ponto_por_token", {
+        _token: data.token,
+      });
+      if (!resRpc.error && resRpc.data) {
+        rpcContexto = resRpc.data as typeof rpcContexto;
+      }
+    } catch {
+      // Ignora erro caso a função RPC ainda não esteja carregada no cache
+    }
 
     if (rpcContexto?.evento) {
       const expiraEm = validarValidadeQr(rpcContexto.evento);
       return {
-        ...rpcContexto,
+        pontoBasico: rpcContexto.pontoBasico ?? false,
         evento: {
           ...rpcContexto.evento,
           qr_code_expira_em: expiraEm,
         },
+        exigeSelfie: rpcContexto.exigeSelfie ?? false,
+        exigeGps: rpcContexto.exigeGps ?? false,
       };
     }
 
@@ -163,18 +185,31 @@ export const obterContextoPonto = createServerFn({ method: "GET" })
     }
     const expiraEm = validarValidadeQr(evento);
 
-    const { data: config } = await clientUtilizado
-      .from("configuracoes")
-      .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
-      .eq("empresa_id", evento.empresa_id)
-      .maybeSingle()
-      .catch(() => ({ data: null }));
+    let config: {
+      checkin_exige_selfie?: boolean | null;
+      checkin_exige_gps?: boolean | null;
+      selfie_retencao_dias?: number | null;
+    } | null = null;
+    try {
+      const resConfig = await clientUtilizado
+        .from("configuracoes")
+        .select("checkin_exige_selfie, checkin_exige_gps, selfie_retencao_dias")
+        .eq("empresa_id", evento.empresa_id)
+        .maybeSingle();
+      config = resConfig.data;
+    } catch {
+      // Ignora erro
+    }
 
-    const { data: plano } = await clientUtilizado
-      .rpc("plano_da_empresa", {
+    let plano: { codigo?: string | null } | null = null;
+    try {
+      const resPlano = await clientUtilizado.rpc("plano_da_empresa", {
         _empresa_id: evento.empresa_id,
-      })
-      .catch(() => ({ data: null }));
+      });
+      plano = resPlano.data as typeof plano;
+    } catch {
+      // Ignora erro
+    }
 
     return {
       pontoBasico: plano?.codigo === "free",

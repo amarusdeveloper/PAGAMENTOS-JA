@@ -282,9 +282,18 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     }
 
     // Abre novo ciclo com o plano escolhido
-    await client.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId }).catch(async () => {
-      await supabaseAdmin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
-    });
+    try {
+      const resCiclo = await client.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
+      if (resCiclo.error) {
+        await supabaseAdmin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
+      }
+    } catch {
+      try {
+        await supabaseAdmin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
+      } catch {
+        // Ignora
+      }
+    }
 
     // Registra log de auditoria
     const auditPayload = {
@@ -301,12 +310,18 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         mensalidade: plano.mensalidade,
       },
     };
-    await client
-      .from("logs_auditoria")
-      .insert(auditPayload)
-      .catch(async () => {
+    try {
+      const resAudit = await client.from("logs_auditoria").insert(auditPayload);
+      if (resAudit.error) {
         await supabaseAdmin.from("logs_auditoria").insert(auditPayload);
-      });
+      }
+    } catch {
+      try {
+        await supabaseAdmin.from("logs_auditoria").insert(auditPayload);
+      } catch {
+        // Ignora
+      }
+    }
 
     return { ok: true, planoNome: plano.nome };
   });

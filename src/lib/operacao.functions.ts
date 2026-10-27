@@ -189,12 +189,18 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
       },
     };
 
-    await context.supabase
-      .from("logs_auditoria")
-      .insert(logPayload)
-      .catch(async () => {
+    try {
+      const resAudit = await context.supabase.from("logs_auditoria").insert(logPayload);
+      if (resAudit.error) {
         await supabaseAdmin.from("logs_auditoria").insert(logPayload);
-      });
+      }
+    } catch {
+      try {
+        await supabaseAdmin.from("logs_auditoria").insert(logPayload);
+      } catch {
+        // Falha de auditoria não-bloqueante
+      }
+    }
 
     return { ok: true, token, expiraEm };
   });
