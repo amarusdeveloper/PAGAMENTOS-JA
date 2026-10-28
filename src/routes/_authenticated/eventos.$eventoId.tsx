@@ -42,6 +42,7 @@ import {
 } from "@/lib/dominio";
 import { parseValorPositivo } from "@/lib/moeda";
 import { rotacionarQrEvento } from "@/lib/operacao.functions";
+import { sincronizarPontoEvento } from "@/lib/ponto.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/eventos/$eventoId")({
@@ -329,6 +330,13 @@ function DetalheEvento() {
     tipo: TipoValor;
   } | null>(null);
   const rotacionarFn = useServerFn(rotacionarQrEvento);
+  const sincronizarFn = useServerFn(sincronizarPontoEvento);
+
+  const sincronizacaoPonto = useQuery({
+    queryKey: ["sincronizar-ponto", eventoId],
+    queryFn: () => sincronizarFn({ data: { eventoId } }),
+    staleTime: 60_000,
+  });
 
   const mudarStatus = useMutation({
     mutationFn: async (novo: StatusEvento) => {
@@ -368,7 +376,9 @@ function DetalheEvento() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["evento", eventoId] });
       queryClient.invalidateQueries({ queryKey: ["painel"] });
+      queryClient.invalidateQueries({ queryKey: ["sincronizar-ponto", eventoId] });
       queryClient.refetchQueries({ queryKey: ["evento", eventoId] });
+      queryClient.refetchQueries({ queryKey: ["sincronizar-ponto", eventoId] });
       toast.success("Novo QR Code gerado e ativado por 12 horas.");
     },
     onError: (error: Error) => toast.error(error.message),
@@ -391,8 +401,9 @@ function DetalheEvento() {
 
   const e = evento.data;
   const proximo = proximoStatus(e.status);
+  const tokenAtivo = sincronizacaoPonto.data?.signedToken || e.qr_code_token;
   const urlPonto =
-    typeof window !== "undefined" ? `${window.location.origin}/ponto/${e.qr_code_token}` : "";
+    typeof window !== "undefined" ? `${window.location.origin}/ponto/${tokenAtivo}` : "";
 
   return (
     <AppShell

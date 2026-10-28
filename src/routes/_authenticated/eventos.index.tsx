@@ -71,6 +71,14 @@ function NovoEvento({ onFechar }: { onFechar: () => void }) {
 
   const criar = useMutation({
     mutationFn: async () => {
+      const agora = Date.now();
+      const fimTimestamp = fim ? new Date(fim).getTime() : 0;
+      const expiraMs = Math.max(
+        fimTimestamp > 0 ? fimTimestamp + 12 * 60 * 60_000 : 0,
+        agora + 24 * 60 * 60_000,
+      );
+      const qr_code_expira_em = new Date(expiraMs).toISOString();
+
       const { data, error } = await supabase
         .from("eventos")
         .insert({
@@ -80,6 +88,7 @@ function NovoEvento({ onFechar }: { onFechar: () => void }) {
           local: local.trim() || null,
           data_inicio: new Date(inicio).toISOString(),
           data_fim: fim ? new Date(fim).toISOString() : null,
+          qr_code_expira_em,
         })
         .select("id")
         .single();

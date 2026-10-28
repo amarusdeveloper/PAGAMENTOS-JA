@@ -94,13 +94,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         name: "description",
         content:
-          "Já — Plataforma B2B de gestão de equipes, folha de ponto digital em campo com selfie e GPS, conferência e repasses Pix.",
+          "Plataforma de gestão operacional e financeira para agências de eventos e empresas: colaboradores, escalas, registro de ponto, fechamentos e pagamentos.",
       },
       { property: "og:title", content: "Já — Gestão de Equipes e Pagamentos" },
       {
         property: "og:description",
         content:
-          "Plataforma para controle operacional de eventos, folha de ponto por QR Code e fechamento financeiro com Pix em lote.",
+          "Plataforma de gestão operacional e financeira para agências de eventos e empresas: colaboradores, escalas, registro de ponto, fechamentos e pagamentos.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

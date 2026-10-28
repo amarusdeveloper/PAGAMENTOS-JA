@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireCapability } from "@/lib/autorizacao.server";
+import { salvarSessaoEvento } from "@/lib/ponto-store.server";
+import { criarTokenQrCodeAssinado } from "@/lib/ponto.signed-token";
 
 const tipoPonto = z.enum(["entrada", "inicio_intervalo", "fim_intervalo", "saida"]);
 
@@ -116,7 +118,7 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
     // Tenta primeiro com context.supabase (autenticado com RLS da agência)
     const { data: eventoAuth } = await context.supabase
       .from("eventos")
-      .select("empresa_id, data_fim, status")
+      .select("id, empresa_id, nome, local, data_inicio, data_fim, status")
       .eq("id", data.eventoId)
       .maybeSingle();
 
@@ -124,7 +126,7 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
     if (!evento) {
       const { data: eventoAdmin } = await supabaseAdmin
         .from("eventos")
-        .select("empresa_id, data_fim, status")
+        .select("id, empresa_id, nome, local, data_inicio, data_fim, status")
         .eq("id", data.eventoId)
         .maybeSingle();
       evento = eventoAdmin;
@@ -195,12 +197,39 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
         await supabaseAdmin.from("logs_auditoria").insert(logPayload);
       }
     } catch {
-      try {
-        await supabaseAdmin.from("logs_auditoria").insert(logPayload);
-      } catch {
-        // Falha de auditoria não-bloqueante
-      }
+      // Falha de auditoria não-bloqueante
     }
 
-    return { ok: true, token, expiraEm };
+    const signedToken = criarTokenQrCodeAssinado({
+      id: evento.id,
+      empresa_id: evento.empresa_id,
+      nome: evento.nome,
+      local: evento.local,
+      status: evento.status,
+      data_inicio: evento.data_inicio,
+      data_fim: evento.data_fim,
+      qr_code_expira_em: expiraEm,
+      qr_code_token: token,
+    });
+
+    salvarSessaoEvento({
+      eventoId: evento.id,
+      empresaId: evento.empresa_id,
+      qrCodeToken: token,
+      signedToken,
+      nome: evento.nome,
+      local: evento.local,
+      status: evento.status,
+      data_inicio: evento.data_inicio,
+      data_fim: evento.data_fim,
+      qr_code_expira_em: expiraEm,
+      exigeSelfie: false,
+      exigeGps: false,
+      pontoBasico: false,
+      authHeader: context.authHeader ?? null,
+      escalas: [],
+      expiraEm: new Date(expiraEm).getTime(),
+    });
+
+    return { ok: true, token, signedToken, expiraEm };
   });

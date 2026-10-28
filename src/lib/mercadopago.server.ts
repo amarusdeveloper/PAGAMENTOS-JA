@@ -1,5 +1,6 @@
 import { createMiddleware } from "@tanstack/react-start";
 import { requireOrganizationContext } from "./autorizacao.server";
+import type { ContextoResolvido } from "./dominio";
 
 export type StatusAssinaturaMercadoPago =
   "ativo" | "pendente" | "vencido" | "cancelado" | "trial" | "isento";
@@ -8,11 +9,11 @@ export interface ResultadoVerificacaoAssinatura {
   status: StatusAssinaturaMercadoPago;
   pago: boolean;
   bloqueado: boolean;
-  motivo?: string;
-  subscriptionId?: string;
-  valor?: number;
-  proximoVencimento?: string | null;
-  detalhes?: Record<string, unknown>;
+  motivo?: string | undefined;
+  subscriptionId?: string | undefined;
+  valor?: number | undefined;
+  proximoVencimento?: string | null | undefined;
+  detalhes?: Record<string, string | number | boolean | null | undefined> | undefined;
 }
 
 export class AssinaturaBloqueadaError extends Error {
@@ -59,7 +60,7 @@ export function limparCacheAssinatura(empresaId?: string) {
  */
 export async function consultarAssinaturaMercadoPagoApi(params: {
   accessToken: string;
-  subscriptionId?: string;
+  subscriptionId?: string | undefined;
   empresaId: string;
 }): Promise<ResultadoVerificacaoAssinatura> {
   const { accessToken, subscriptionId, empresaId } = params;
@@ -360,7 +361,7 @@ export const requireMercadoPagoAssinaturaAtiva = createMiddleware({
   type: "function",
 }).server(async ({ next, context }) => {
   const org = requireOrganizationContext(
-    context as { contexto?: { organizationContext?: boolean; empresaId?: string | null } },
+    context as unknown as { contexto?: ContextoResolvido | null },
   );
   const empresaId = org.empresaId;
 

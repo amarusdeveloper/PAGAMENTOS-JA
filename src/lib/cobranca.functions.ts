@@ -1,9 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
+import type { Database, Tables } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireOrganizationContext } from "./autorizacao.server";
 import { calcularFatura } from "./cobranca-v2";
+
+type PlanoRow = Tables<"planos">;
+type FaturaRow = Tables<"faturas_plataforma">;
+type TaxaRow = Tables<"taxas_meio_pagamento">;
+type CicloRow = Tables<"ciclos_cobranca">;
+type ResumoUso = Database["public"]["Functions"]["resumo_uso_empresa"]["Returns"][number];
 
 export const carregarCobranca = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -20,7 +27,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
     const agora = new Date().toISOString();
     const daqui30Dias = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
 
-    const fallbackRetorno = async (planosData?: unknown[]) => {
+    const fallbackRetorno = async (planosData?: PlanoRow[]) => {
       let planosFinais = planosData;
       if (!planosFinais || !Array.isArray(planosFinais) || planosFinais.length === 0) {
         try {
@@ -30,42 +37,58 @@ export const carregarCobranca = createServerFn({ method: "GET" })
             .select("*")
             .eq("ativo", true)
             .order("ordem");
-          planosFinais = dbPlanos ?? [];
+          planosFinais = (dbPlanos ?? []) as PlanoRow[];
         } catch {
-          planosFinais = [];
+          planosFinais = [] as PlanoRow[];
         }
       }
 
+      const usoFallback: ResumoUso = {
+        aviso_vendas: false,
+        ciclo_fim: daqui30Dias,
+        ciclo_inicio: agora,
+        clt_ativos: 0,
+        estimativa: 0,
+        eventos_usados: 0,
+        limite_clt: 0,
+        limite_eventos: 1,
+        limite_pessoas_evento: 0,
+        limite_supervisores: 0,
+        mensalidade: 0,
+        participacoes_excedentes: 0,
+        participacoes_incluidas: 5,
+        participacoes_usadas: 0,
+        plano_codigo: "free",
+        plano_id: "",
+        plano_nome: "Free",
+        recursos: {},
+        valor_excedente: 0,
+      };
+
+      const cicloFallback: CicloRow = {
+        id: "",
+        assinatura_id: null,
+        empresa_id: empresaId ?? "",
+        plano_id: null,
+        plano_nome: "Free",
+        mensalidade: 0,
+        participacoes_incluidas: 5,
+        valor_excedente: 0,
+        inicio: agora,
+        fim: daqui30Dias,
+        trial_ate: null,
+        desconto_tipo: null,
+        desconto_valor: 0,
+        criado_em: agora,
+      };
+
       return {
-        uso: {
-          plano_nome: "Free",
-          plano_codigo: "free",
-          eventos_usados: 0,
-          limite_eventos: 1 as number | null,
-          participacoes_usadas: 0,
-          clt_ativos: 0,
-          limite_clt: null as number | null,
-          limite_pessoas_evento: null as number | null,
-          limite_supervisores: null as number | null,
-          aviso_vendas: false,
-        },
-        ciclo: {
-          id: null,
-          plano_id: null as string | null,
-          plano_nome: "Free",
-          mensalidade: 0,
-          participacoes_incluidas: 5,
-          valor_excedente: 0,
-          inicio: agora,
-          fim: daqui30Dias,
-          trial_ate: null as string | null,
-          desconto_tipo: null as string | null,
-          desconto_valor: 0,
-        },
+        uso: usoFallback,
+        ciclo: cicloFallback,
         estimativa: { total: 0, excedentes: 0, valorExcedente: 0, bruto: 0, desconto: 0 },
-        faturas: [],
-        planos: (planosFinais as unknown[]) ?? [],
-        taxas: [],
+        faturas: [] as FaturaRow[],
+        planos: (planosFinais ?? []) as PlanoRow[],
+        taxas: [] as TaxaRow[],
       };
     };
 
@@ -149,8 +172,7 @@ export const carregarCobranca = createServerFn({ method: "GET" })
       ]);
 
       const resumo = uso.data?.[0];
-      const listaPlanos =
-        (planos.data && planos.data.length > 0 ? planos.data : planosFinais) ?? [];
+      const listaPlanos = (planos.data && planos.data.length > 0 ? planos.data : []) as PlanoRow[];
 
       if (!resumo || !ciclo?.data) {
         return fallbackRetorno(listaPlanos);
@@ -181,9 +203,9 @@ export const carregarCobranca = createServerFn({ method: "GET" })
         uso: resumo,
         ciclo: c,
         estimativa: calcularFatura(preco, resumo.participacoes_usadas ?? 0, desconto),
-        faturas: faturas.data ?? [],
+        faturas: (faturas.data ?? []) as FaturaRow[],
         planos: listaPlanos,
-        taxas: taxas.data ?? [],
+        taxas: (taxas.data ?? []) as TaxaRow[],
       };
     } catch (err) {
       console.warn("[carregarCobranca] Recuperando fallback com planos:", err);

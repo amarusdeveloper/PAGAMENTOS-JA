@@ -23,16 +23,20 @@ function createSupabaseFetch(apiKey: string): typeof fetch {
   };
 }
 
-export function createSupabasePublicClient() {
-  const url = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"];
-  const apiKey =
-    process.env["SUPABASE_PUBLISHABLE_KEY"] || process.env["VITE_SUPABASE_PUBLISHABLE_KEY"];
+function isPlaceholder(value?: string | null): boolean {
+  if (!value) return true;
+  return value.includes("your-project") || value.includes("...") || value === "your-anon-key";
+}
 
-  if (!url || !apiKey) {
-    throw new Error(
-      "Configuração pública do Supabase incompleta. Configure SUPABASE_URL e SUPABASE_PUBLISHABLE_KEY (ou as variáveis VITE_ correspondentes) na Vercel.",
-    );
-  }
+export function createSupabasePublicClient() {
+  const rawUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"];
+  const url = !isPlaceholder(rawUrl) ? rawUrl! : "https://rutmjtmirwcyoroyjqdy.supabase.co";
+
+  const rawKey =
+    process.env["SUPABASE_PUBLISHABLE_KEY"] || process.env["VITE_SUPABASE_PUBLISHABLE_KEY"];
+  const apiKey = !isPlaceholder(rawKey)
+    ? rawKey!
+    : "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
 
   return createClient<Database>(url, apiKey, {
     global: { fetch: createSupabaseFetch(apiKey) },

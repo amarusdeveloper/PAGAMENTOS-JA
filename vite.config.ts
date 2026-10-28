@@ -15,14 +15,22 @@ export default defineConfig({
   vite: {
     define: {
       "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(
-        process.env["VITE_SUPABASE_URL"] || "https://rutmjtmirwcyoroyjqdy.supabase.co",
+        process.env["VITE_SUPABASE_URL"] &&
+          !process.env["VITE_SUPABASE_URL"].includes("your-project")
+          ? process.env["VITE_SUPABASE_URL"]
+          : "https://rutmjtmirwcyoroyjqdy.supabase.co",
       ),
       "import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY": JSON.stringify(
-        process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
-          "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf",
+        process.env["VITE_SUPABASE_PUBLISHABLE_KEY"] &&
+          !process.env["VITE_SUPABASE_PUBLISHABLE_KEY"].includes("...")
+          ? process.env["VITE_SUPABASE_PUBLISHABLE_KEY"]
+          : "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf",
       ),
       "import.meta.env.VITE_SUPABASE_PROJECT_ID": JSON.stringify(
-        process.env["VITE_SUPABASE_PROJECT_ID"] || "rutmjtmirwcyoroyjqdy",
+        process.env["VITE_SUPABASE_PROJECT_ID"] &&
+          !process.env["VITE_SUPABASE_PROJECT_ID"].includes("your-project")
+          ? process.env["VITE_SUPABASE_PROJECT_ID"]
+          : "rutmjtmirwcyoroyjqdy",
       ),
     },
     optimizeDeps: {

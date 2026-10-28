@@ -33,14 +33,23 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
   };
 }
 
+function isPlaceholder(value?: string | null): boolean {
+  if (!value) return true;
+  return value.includes("your-project") || value.includes("...") || value === "your-anon-key";
+}
+
 export const requireSupabaseAuth = createMiddleware({ type: "function" }).server(
   async ({ next }) => {
     const rawUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"];
-    const SUPABASE_URL = rawUrl || "https://rutmjtmirwcyoroyjqdy.supabase.co";
+    const SUPABASE_URL = !isPlaceholder(rawUrl)
+      ? rawUrl!
+      : "https://rutmjtmirwcyoroyjqdy.supabase.co";
 
     const rawKey =
       process.env["SUPABASE_PUBLISHABLE_KEY"] || process.env["VITE_SUPABASE_PUBLISHABLE_KEY"];
-    const SUPABASE_PUBLISHABLE_KEY = rawKey || "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
+    const SUPABASE_PUBLISHABLE_KEY = !isPlaceholder(rawKey)
+      ? rawKey!
+      : "sb_publishable_qjse4h33OMOJeWDxd95jHg_b3fwRmrf";
 
     if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
       const missing = [
@@ -121,6 +130,7 @@ export const requireSupabaseAuth = createMiddleware({ type: "function" }).server
         userId,
         claims,
         contexto,
+        authHeader,
       },
     });
   },
