@@ -275,10 +275,33 @@ function Agencias() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Teste grátis até</Label>
+                <div className="flex items-center justify-between">
+                  <Label>Teste grátis até</Label>
+                  <div className="flex items-center gap-1">
+                    {[7, 15, 30].map((dias) => (
+                      <button
+                        key={dias}
+                        type="button"
+                        title={`Estender teste grátis por mais ${dias} dias`}
+                        onClick={() => {
+                          const novaData = new Date();
+                          novaData.setDate(novaData.getDate() + dias);
+                          const iso = novaData.toISOString().slice(0, 10);
+                          salvarAssinatura.mutate({
+                            empresaId: e.id,
+                            patch: { trial_ate: iso },
+                          });
+                        }}
+                        className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+                      >
+                        +{dias}d
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <Input
                   type="date"
-                  defaultValue={a?.trial_ate ?? ""}
+                  defaultValue={a?.trial_ate ? a.trial_ate.slice(0, 10) : ""}
                   onBlur={(ev) =>
                     salvarAssinatura.mutate({
                       empresaId: e.id,

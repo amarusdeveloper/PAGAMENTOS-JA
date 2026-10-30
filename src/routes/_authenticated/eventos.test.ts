@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { podeCancelar, proximoStatus, validarTransicao, type StatusEvento } from "@/lib/dominio";
+import {
+  calcularStatusSugeridoEvento,
+  podeCancelar,
+  proximoStatus,
+  statusAnterior,
+  validarTransicao,
+  type StatusEvento,
+} from "@/lib/dominio";
 
 describe("Rotas de Eventos: /eventos e /eventos.$eventoId", () => {
   it("avança o status do evento um passo por vez", () => {
@@ -64,5 +71,60 @@ describe("Rotas de Eventos: /eventos e /eventos.$eventoId", () => {
 
     expect(isExpirado(dataCriacaoRecente)).toBe(false);
     expect(isExpirado(dataCriacaoExpirada)).toBe(true);
+  });
+
+  it("recua status com statusAnterior e permite transições manuais em finalização", () => {
+    expect(statusAnterior("fechamento")).toBe("encerrando");
+    expect(statusAnterior("pagamento")).toBe("fechamento");
+    expect(statusAnterior("concluido")).toBe("pagamento");
+    expect(statusAnterior("arquivado")).toBe("concluido");
+    expect(statusAnterior("planejamento")).toBeNull();
+
+    // Com permitirManual, permite navegação direta nas etapas de finalização
+    expect(validarTransicao("fechamento", "pagamento", { permitirManual: true })).toBeNull();
+    expect(validarTransicao("pagamento", "fechamento", { permitirManual: true })).toBeNull();
+    expect(validarTransicao("em_execucao", "fechamento", { permitirManual: true })).toBeNull();
+  });
+
+  it("calcula auto-avanço do fluxo de montagem do evento", () => {
+    // 1. Criação de equipe avança planejamento -> escala
+    const res1 = calcularStatusSugeridoEvento({
+      statusAtual: "planejamento",
+      totalEquipes: 1,
+      totalEscalas: 0,
+      escalasConfirmadas: 0,
+    });
+    expect(res1.mudou).toBe(true);
+    expect(res1.statusSugerido).toBe("escala");
+
+    // 2. Escalação de freelancers avança escala -> confirmacoes
+    const res2 = calcularStatusSugeridoEvento({
+      statusAtual: "escala",
+      totalEquipes: 1,
+      totalEscalas: 2,
+      escalasConfirmadas: 0,
+    });
+    expect(res2.mudou).toBe(true);
+    expect(res2.statusSugerido).toBe("confirmacoes");
+
+    // 3. Confirmações concluídas avançam -> pronto
+    const res3 = calcularStatusSugeridoEvento({
+      statusAtual: "confirmacoes",
+      totalEquipes: 1,
+      totalEscalas: 2,
+      escalasConfirmadas: 2,
+    });
+    expect(res3.mudou).toBe(true);
+    expect(res3.statusSugerido).toBe("pronto");
+
+    // 4. Etapas manuais de finalização nunca são alteradas automaticamente
+    const resFinal = calcularStatusSugeridoEvento({
+      statusAtual: "fechamento",
+      totalEquipes: 1,
+      totalEscalas: 2,
+      escalasConfirmadas: 2,
+    });
+    expect(resFinal.mudou).toBe(false);
+    expect(resFinal.statusSugerido).toBe("fechamento");
   });
 });

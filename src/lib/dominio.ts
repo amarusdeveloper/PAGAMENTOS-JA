@@ -94,6 +94,18 @@ export const ROTULO_TIPO_VINCULO: Record<TipoVinculo, string> = {
   clt: "CLT",
 };
 
+/** Etapas consideradas de finalização manual e fechamento */
+export const ETAPAS_FINALIZACAO: StatusEvento[] = [
+  "fechamento",
+  "pagamento",
+  "concluido",
+  "arquivado",
+];
+
+export function ehEtapaFinalizacao(status: StatusEvento): boolean {
+  return ETAPAS_FINALIZACAO.includes(status);
+}
+
 /** Próximo estado permitido, ou null se o evento já terminou a sequência. */
 export function proximoStatus(atual: StatusEvento): StatusEvento | null {
   if (atual === "cancelado") return null;
@@ -102,27 +114,131 @@ export function proximoStatus(atual: StatusEvento): StatusEvento | null {
   return ORDEM_STATUS_EVENTO[i + 1] ?? null;
 }
 
+/** Status anterior na sequência do evento (para recuo manual em fechamentos/ajustes). */
+export function statusAnterior(atual: StatusEvento): StatusEvento | null {
+  if (atual === "cancelado") return null;
+  const i = ORDEM_STATUS_EVENTO.indexOf(atual);
+  if (i <= 0) return null;
+  return ORDEM_STATUS_EVENTO[i - 1] ?? null;
+}
+
 export function podeCancelar(atual: StatusEvento): boolean {
   return !["concluido", "arquivado", "cancelado"].includes(atual);
 }
 
 /**
- * Espelha estado_evento_service.transicionar: só avança um passo por vez,
- * nunca volta, e cancelar só antes de concluir.
+ * Valida a transição de estado. No modo estrito exige avanço de 1 em 1.
+ * Permite flexibilidade quando for ajuste manual autorizado (especialmente em finalização).
  */
-export function validarTransicao(atual: StatusEvento, novo: StatusEvento): string | null {
+export function validarTransicao(
+  atual: StatusEvento,
+  novo: StatusEvento,
+  opcoes?: { permitirManual?: boolean },
+): string | null {
   if (novo === "cancelado") {
     return podeCancelar(atual)
       ? null
       : `Evento em "${ROTULO_STATUS_EVENTO[atual]}" não pode mais ser cancelado`;
   }
   if (atual === "cancelado") return "Evento cancelado não pode mudar de estado";
+  if (atual === novo) return null;
+
+  // Ajuste manual pelo organizador ou etapas de finalização
+  if (opcoes?.permitirManual) {
+    return null;
+  }
+
   const esperado = proximoStatus(atual);
   if (!esperado) return `Evento já está no último estado ("${ROTULO_STATUS_EVENTO[atual]}")`;
   if (novo !== esperado) {
     return `Não é possível ir de "${ROTULO_STATUS_EVENTO[atual]}" direto para "${ROTULO_STATUS_EVENTO[novo]}" — passe por "${ROTULO_STATUS_EVENTO[esperado]}" primeiro`;
   }
   return null;
+}
+
+/**
+ * Avalia o progresso da montagem do evento e calcula se deve avançar automaticamente.
+ */
+export function calcularStatusSugeridoEvento(params: {
+  statusAtual: StatusEvento;
+  totalEquipes: number;
+  totalEscalas: number;
+  escalasConfirmadas: number;
+  dataInicioIso?: string | null;
+  dataFimIso?: string | null;
+  temPontos?: boolean;
+}): {
+  statusSugerido: StatusEvento;
+  mudou: boolean;
+  motivo: string | null;
+} {
+  const {
+    statusAtual,
+    totalEquipes,
+    totalEscalas,
+    escalasConfirmadas,
+    dataInicioIso,
+    dataFimIso,
+    temPontos,
+  } = params;
+
+  // Etapas de finalização manual nunca devem ser rebaixadas ou alteradas automaticamente
+  if (["cancelado", "fechamento", "pagamento", "concluido", "arquivado"].includes(statusAtual)) {
+    return { statusSugerido: statusAtual, mudou: false, motivo: null };
+  }
+
+  const agora = Date.now();
+  const inicioMs = dataInicioIso ? new Date(dataInicioIso).getTime() : null;
+  const fimMs = dataFimIso ? new Date(dataFimIso).getTime() : null;
+
+  // 1. Fim do evento por horário
+  if (fimMs && agora >= fimMs && statusAtual === "em_execucao") {
+    return {
+      statusSugerido: "encerrando",
+      mudou: true,
+      motivo: "Horário de término do evento atingido.",
+    };
+  }
+
+  // 2. Início do evento por marcação de ponto ou horário
+  if ((temPontos || (inicioMs && agora >= inicioMs)) && statusAtual === "pronto") {
+    return {
+      statusSugerido: "em_execucao",
+      mudou: true,
+      motivo: temPontos
+        ? "Primeiro registro de ponto efetuado."
+        : "Horário de início do evento atingido.",
+    };
+  }
+
+  // 3. Montagem: Pronto (escalas confirmadas)
+  if (statusAtual === "confirmacoes" && totalEscalas > 0 && escalasConfirmadas >= totalEscalas) {
+    return {
+      statusSugerido: "pronto",
+      mudou: true,
+      motivo: "Todas as escalas foram confirmadas pela equipe.",
+    };
+  }
+
+  // 4. Montagem: Confirmações (escalas adicionadas)
+  if (["planejamento", "escala"].includes(statusAtual) && totalEscalas > 0) {
+    return {
+      statusSugerido: "confirmacoes",
+      mudou: true,
+      motivo: "Profissionais escalados. Aguardando confirmações.",
+    };
+  }
+
+  // 5. Montagem: Escala (primeira equipe criada)
+  if (statusAtual === "planejamento" && totalEquipes > 0) {
+    return {
+      statusSugerido: "escala",
+      mudou: true,
+      motivo: "Equipe criada. Defina os profissionais na escala.",
+    };
+  }
+
+  return { statusSugerido: statusAtual, mudou: false, motivo: null };
 }
 
 const arredonda = (n: number) => Math.round(n * 100) / 100;
@@ -433,4 +549,20 @@ export const formatarCpf = (v: string) => {
     .replace(/^(\d{3})(\d)/, "$1.$2")
     .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
     .replace(/\.(\d{3})(\d{1,2})$/, ".$1-$2");
+};
+
+export const formatarCnpjOuCpf = (v: string) => {
+  const d = soDigitos(v);
+  if (d.length <= 11) {
+    return d
+      .replace(/^(\d{3})(\d)/, "$1.$2")
+      .replace(/^(\d{3})\.(\d{3})(\d)/, "$1.$2.$3")
+      .replace(/\.(\d{3})(\d{1,2})$/, ".$1-$2");
+  }
+  return d
+    .slice(0, 14)
+    .replace(/^(\d{2})(\d)/, "$1.$2")
+    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, "$1.$2/$3")
+    .replace(/\/(\d{4})(\d{1,2})$/, "/$1-$2");
 };

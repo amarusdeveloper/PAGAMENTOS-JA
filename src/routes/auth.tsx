@@ -2,23 +2,32 @@ import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import {
   ArrowLeft,
+  Building2,
+  Check,
   CheckCircle2,
+  CreditCard,
   KeyRound,
   Loader2,
   LogIn,
   Mail,
   ShieldCheck,
+  Sparkles,
   UserPlus,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { cadastrarOuRedefinirUsuario } from "@/lib/auth.functions";
 import { carregarDadosAcesso, resolverDestinoAcesso } from "@/lib/auth-navigation";
+import { formatarCnpjOuCpf, moeda } from "@/lib/dominio";
+import { concluirCadastroComEmpresaEPlano } from "@/lib/onboarding.functions";
+import { DIAS_TRIAL_PADRAO, PLANOS_CATALOGO } from "@/lib/planos-catalogo";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -167,6 +176,13 @@ function Auth() {
           error.message.includes("invalid_credentials")
         ) {
           toast.error("E-mail ou senha incorretos.");
+        } else if (
+          error.message.toLowerCase().includes("email not confirmed") ||
+          error.message.toLowerCase().includes("não confirmado")
+        ) {
+          toast.error(
+            "E-mail ainda não confirmado. Verifique a mensagem de ativação enviada para sua caixa de entrada.",
+          );
         } else {
           toast.error(error.message);
         }
@@ -180,6 +196,30 @@ function Auth() {
     } catch (err) {
       setCarregando(false);
       toast.error(err instanceof Error ? err.message : "Erro ao efetuar login.");
+    }
+  }
+
+  // Handler: Reenviar E-mail de Confirmação
+  async function handleReenviarConfirmacao() {
+    if (!email.trim()) {
+      toast.error("Informe seu e-mail para reenviar a confirmação.");
+      return;
+    }
+    setCarregando(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+      });
+      setCarregando(false);
+      if (error) {
+        toast.error(error.message || "Erro ao reenviar confirmação.");
+      } else {
+        toast.success("E-mail de confirmação reenviado! Verifique sua caixa de entrada.");
+      }
+    } catch {
+      setCarregando(false);
+      toast.error("Falha ao reenviar e-mail de confirmação.");
     }
   }
 
@@ -197,36 +237,103 @@ function Auth() {
 
     setCarregando(true);
     try {
-      const res = await cadastrarOuRedefinir({
-        data: {
-          email: email.trim(),
-          password: senha,
-          nome: nome.trim(),
-        },
-      });
+      let cadastroCriadoPorAdmin = false;
 
-      if (!res.sucesso) {
-        setCarregando(false);
-        toast.error(res.erro || "Falha ao processar cadastro.");
-        return;
+      // 1. Tenta função de servidor (caso SUPABASE_SERVICE_ROLE_KEY esteja configurada)
+      try {
+        const res = await cadastrarOuRedefinir({
+          data: {
+            email: email.trim(),
+            password: senha,
+            nome: nome.trim(),
+          },
+        });
+        if (res.sucesso && !res.isClientFlow) {
+          cadastroCriadoPorAdmin = true;
+        }
+      } catch {
+        // Sem chave administrativa ou falha de RPC de servidor; segue para o fluxo oficial de cliente
       }
 
-      // Autentica imediatamente
-      const { data, error } = await supabase.auth.signInWithPassword({
+      // 2. Se não foi criado via admin no servidor, realiza signUp direto via Supabase Auth
+      if (!cadastroCriadoPorAdmin) {
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: email.trim(),
+          password: senha,
+          options: {
+            data: {
+              nome: nome.trim(),
+            },
+          },
+        });
+
+        if (signUpError) {
+          setCarregando(false);
+          const msg = signUpError.message?.toLowerCase() || "";
+          if (msg.includes("already registered") || msg.includes("já cadastrado")) {
+            toast.error("Este e-mail já possui cadastro. Faça login para continuar.");
+            setModo("login");
+            return;
+          }
+          if (msg.includes("weak") || msg.includes("pwned") || msg.includes("easy to guess")) {
+            toast.error(
+              "A senha informada é muito simples. Por favor, utilize uma senha mais forte.",
+            );
+            return;
+          }
+          toast.error(signUpError.message || "Falha ao criar conta.");
+          return;
+        }
+
+        // Se o Supabase retornou identidades vazias, o usuário já existe
+        if (
+          signUpData?.user &&
+          Array.isArray(signUpData.user.identities) &&
+          signUpData.user.identities.length === 0
+        ) {
+          setCarregando(false);
+          toast.error("Este e-mail já está cadastrado. Faça login com sua senha.");
+          setModo("login");
+          return;
+        }
+      }
+
+      // 3. Tenta autenticar imediatamente
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password: senha,
       });
 
       setCarregando(false);
-      if (error) {
-        toast.error("Conta criada! Por favor, faça login com sua senha.");
+
+      if (authError) {
+        const msg = authError.message?.toLowerCase() || "";
+        if (msg.includes("email not confirmed") || msg.includes("não confirmado")) {
+          toast.success(
+            "Conta criada! Enviamos um link de confirmação para o seu e-mail. Por favor, confirme para entrar.",
+          );
+          setModo("login");
+          return;
+        }
+        toast.info("Conta cadastrada! Por favor, faça login com sua senha.");
         setModo("login");
         return;
       }
 
-      if (data?.user) {
+      if (authData?.user) {
+        try {
+          await supabase.from("usuarios").upsert({
+            id: authData.user.id,
+            email: email.trim().toLowerCase(),
+            nome: nome.trim(),
+            ativo: true,
+          });
+        } catch {
+          // Segue para onboarding caso RLS dependa da criação da agência
+        }
+
         toast.success("Conta criada com sucesso! Bem-vindo ao Já.");
-        await redirecionarParaDestino(data.user);
+        await redirecionarParaDestino(authData.user);
       }
     } catch (err) {
       setCarregando(false);
@@ -354,8 +461,8 @@ function Auth() {
                 </Button>
               </form>
 
-              {/* Alternar para Cadastro */}
-              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+              {/* Alternar para Cadastro e Reenviar Confirmação */}
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 text-center space-y-2">
                 <p className="text-xs sm:text-sm text-slate-500">
                   Ainda não tem uma conta?{" "}
                   <button
@@ -368,6 +475,16 @@ function Auth() {
                     Criar conta
                   </button>
                 </p>
+                <div>
+                  <button
+                    type="button"
+                    onClick={handleReenviarConfirmacao}
+                    disabled={carregando}
+                    className="text-xs text-slate-500 hover:text-blue-600 hover:underline"
+                  >
+                    Não recebeu a confirmação? Reenviar e-mail
+                  </button>
+                </div>
               </div>
             </div>
           )}

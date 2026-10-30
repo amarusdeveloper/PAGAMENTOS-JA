@@ -1,11 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { supabaseAdmin } from "@/integrations/supabase/client.server";
 
 export const autoConfirmarEmail = createServerFn({ method: "POST" })
   .validator((d: unknown) => z.object({ email: z.string().email() }).parse(d))
   .handler(async ({ data }) => {
     try {
+      const { hasAdminKey, supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      if (!hasAdminKey()) {
+        return { confirmado: false, erro: "Chave administrativa não disponível" };
+      }
+
       const emailLimpo = data.email.trim().toLowerCase();
       const { data: usersData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
       if (listErr || !usersData?.users) {
@@ -44,6 +48,11 @@ export const cadastrarOuRedefinirUsuario = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => {
     try {
+      const { hasAdminKey, supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      if (!hasAdminKey()) {
+        return { sucesso: true, isClientFlow: true };
+      }
+
       const emailLimpo = data.email.trim().toLowerCase();
       const { data: usersData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
       if (listErr) {

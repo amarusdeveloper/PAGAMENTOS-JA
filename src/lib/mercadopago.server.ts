@@ -235,13 +235,37 @@ export async function verificarStatusAssinaturaEmpresa(
         pago: true,
         bloqueado: false,
         proximoVencimento: assinatura.trial_ate,
-        motivo: "Período de avaliação gratuito ativo.",
+        motivo: "Período de avaliação gratuito ativo (7 dias).",
       };
       cacheVerificacoes.set(empresaId, {
         resultado: res,
         expiraEm: agora + 60_000,
       });
       return res;
+    }
+
+    // Se o período de teste expirou e não possui plano pago confirmado
+    if (assinatura.trial_ate && new Date(assinatura.trial_ate).getTime() <= agora) {
+      const ehPlanoComercialAtivo =
+        assinatura.status === "ativa" &&
+        assinatura.plano &&
+        (assinatura.plano as { mensalidade?: number }).mensalidade! > 0;
+
+      if (!ehPlanoComercialAtivo) {
+        const res: ResultadoVerificacaoAssinatura = {
+          status: "vencido",
+          pago: false,
+          bloqueado: true,
+          proximoVencimento: assinatura.trial_ate,
+          motivo:
+            "Seu período de teste gratuito de 7 dias encerrou. Escolha um plano para continuar ou solicite extensão de prazo à administração.",
+        };
+        cacheVerificacoes.set(empresaId, {
+          resultado: res,
+          expiraEm: agora + 30_000,
+        });
+        return res;
+      }
     }
 
     if (assinatura.status === "bloqueada") {
