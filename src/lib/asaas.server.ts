@@ -4,9 +4,42 @@
  * Documentação: https://docs.asaas.com/
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 export type AmbienteAsaas = "sandbox" | "producao";
 
+function carregarEnvLocal(): void {
+  if (process.env["ASAAS_API_KEY"]) return;
+  try {
+    process.loadEnvFile?.();
+  } catch {
+    // ignora
+  }
+  if (!process.env["ASAAS_API_KEY"]) {
+    try {
+      const envPath = path.resolve(process.cwd(), ".env");
+      if (fs.existsSync(envPath)) {
+        const conteudo = fs.readFileSync(envPath, "utf-8");
+        for (const linha of conteudo.split("\n")) {
+          const match = linha.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+          if (match && match[1] && match[2] !== undefined) {
+            const k = match[1];
+            const v = match[2].trim().replace(/^["']|["']$/g, "");
+            if (!process.env[k]) {
+              process.env[k] = v;
+            }
+          }
+        }
+      }
+    } catch {
+      // ignora
+    }
+  }
+}
+
 function baseUrl(): string {
+  carregarEnvLocal();
   const chave = process.env["ASAAS_API_KEY"] ?? "";
   if (chave.startsWith("$aact_prod_")) {
     return "https://api.asaas.com/v3";
@@ -31,6 +64,7 @@ async function chamar<T>(
   caminho: string,
   init: { method: "GET" | "POST"; body?: unknown } = { method: "GET" },
 ): Promise<T> {
+  carregarEnvLocal();
   const chave = process.env["ASAAS_API_KEY"];
   if (!chave) throw new AsaasError("Chave do Asaas não configurada.", 500);
 
@@ -75,22 +109,41 @@ export type ClienteAsaas = { id: string };
 
 export async function garantirClienteAsaas(dados: {
   nome: string;
-  cpfCnpj: string;
+  cpfCnpj?: string | null;
   email?: string | null;
   telefone?: string | null;
   referenciaExterna: string;
 }): Promise<string> {
-  const existentes = await chamar<{ data: ClienteAsaas[] }>(
-    `/customers?cpfCnpj=${encodeURIComponent(dados.cpfCnpj)}&limit=1`,
-  );
-  const achado = existentes.data?.[0]?.id;
-  if (achado) return achado;
+  const docLimpo = (dados.cpfCnpj || "").replace(/\D/g, "");
+  const docValido = docLimpo.length === 11 || docLimpo.length === 14 ? docLimpo : undefined;
+
+  if (docValido) {
+    try {
+      const existentes = await chamar<{ data: ClienteAsaas[] }>(
+        `/customers?cpfCnpj=${encodeURIComponent(docValido)}&limit=1`,
+      );
+      const achado = existentes.data?.[0]?.id;
+      if (achado) return achado;
+    } catch {
+      // prossegue
+    }
+  }
+
+  try {
+    const existentesPorRef = await chamar<{ data: ClienteAsaas[] }>(
+      `/customers?externalReference=${encodeURIComponent(dados.referenciaExterna)}&limit=1`,
+    );
+    const achadoRef = existentesPorRef.data?.[0]?.id;
+    if (achadoRef) return achadoRef;
+  } catch {
+    // prossegue
+  }
 
   const criado = await chamar<ClienteAsaas>("/customers", {
     method: "POST",
     body: {
       name: dados.nome,
-      cpfCnpj: dados.cpfCnpj,
+      ...(docValido ? { cpfCnpj: docValido } : {}),
       email: dados.email ?? undefined,
       mobilePhone: dados.telefone ?? undefined,
       externalReference: dados.referenciaExterna,

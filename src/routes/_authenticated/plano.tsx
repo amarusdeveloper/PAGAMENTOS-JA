@@ -78,6 +78,7 @@ function PaginaPlano() {
   const selecionarPlanoFn = useServerFn(selecionarPlanoEmpresa);
   const liquidarFn = useServerFn(confirmarPagamentoFaturaPlano);
 
+  const [planoCarregandoId, setPlanoCarregandoId] = useState<string | null>(null);
   const [planoSelecionado, setPlanoSelecionado] = useState<{
     id: string;
     nome: string;
@@ -117,8 +118,32 @@ function PaginaPlano() {
       queryClient.invalidateQueries({ queryKey: ["assinatura-mercadopago-status"] });
       setPlanoSelecionado(null);
 
-      // Se contratou um plano pago com mensalidade, encaminha na hora para a cobrança
+      // Se contratou um plano pago com mensalidade, encaminha na hora para a cobrança oficial no Asaas
       if (res.cobranca && res.mensalidade > 0) {
+        const url = res.cobranca.checkoutUrl;
+        if (url && url.startsWith("http")) {
+          toast.success("Fatura criada no Asaas! Redirecionando para o pagamento...");
+
+          // Abre a fatura oficial no Asaas (nova aba para evitar bloqueio de iframe X-Frame-Options)
+          try {
+            const popup = window.open(url, "_blank");
+            if (!popup || popup.closed || typeof popup.closed === "undefined") {
+              window.location.href = url;
+            }
+          } catch {
+            window.location.href = url;
+          }
+
+          setCheckoutAberto({
+            faturaId: res.cobranca.faturaId,
+            planoNome: res.planoNome,
+            valor: res.cobranca.valor,
+            pixCopiaCola: res.cobranca.pixCopiaCola,
+            checkoutUrl: url,
+          });
+          return;
+        }
+
         setCheckoutAberto({
           faturaId: res.cobranca.faturaId,
           planoNome: res.planoNome,
@@ -371,17 +396,34 @@ function PaginaPlano() {
                     </Button>
                   ) : (
                     <Button
-                      className="w-full h-11 rounded-xl font-semibold text-xs sm:text-sm bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
-                      onClick={() =>
-                        setPlanoSelecionado({
-                          id: p.id,
-                          nome: p.nome,
-                          mensalidade: p.mensalidade,
-                          participacoes: p.participacoes_incluidas,
-                        })
-                      }
+                      className="w-full h-11 rounded-xl font-semibold text-xs sm:text-sm bg-blue-600 hover:bg-blue-700 text-white shadow-sm gap-2"
+                      disabled={trocarPlano.isPending}
+                      onClick={() => {
+                        if (p.mensalidade > 0) {
+                          setPlanoCarregandoId(p.id);
+                          trocarPlano.mutate(p.id, {
+                            onSettled: () => setPlanoCarregandoId(null),
+                          });
+                        } else {
+                          setPlanoSelecionado({
+                            id: p.id,
+                            nome: p.nome,
+                            mensalidade: p.mensalidade,
+                            participacoes: p.participacoes_incluidas,
+                          });
+                        }
+                      }}
                     >
-                      Escolher este plano
+                      {trocarPlano.isPending && planoCarregandoId === p.id ? (
+                        <>
+                          <Loader2 className="size-4 animate-spin" />
+                          <span>Processando...</span>
+                        </>
+                      ) : p.mensalidade > 0 ? (
+                        <span>Assinar</span>
+                      ) : (
+                        <span>Mudar para plano Free</span>
+                      )}
                     </Button>
                   )}
                 </div>
@@ -540,7 +582,7 @@ function PaginaPlano() {
               Cancelar
             </Button>
             <Button
-              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-semibold gap-1.5"
               disabled={trocarPlano.isPending}
               onClick={() => {
                 if (planoSelecionado) {
@@ -551,10 +593,15 @@ function PaginaPlano() {
               {trocarPlano.isPending ? (
                 <span className="inline-flex items-center gap-1.5">
                   <Loader2 className="size-4 animate-spin" />
-                  <span>Atualizando...</span>
+                  <span>Processando...</span>
+                </span>
+              ) : planoSelecionado && planoSelecionado.mensalidade > 0 ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <span>Assinar</span>
+                  <ExternalLink className="size-3.5" />
                 </span>
               ) : (
-                <span>Confirmar contratação</span>
+                <span>Confirmar migração</span>
               )}
             </Button>
           </DialogFooter>
@@ -585,6 +632,33 @@ function PaginaPlano() {
                   {moeda(checkoutAberto.valor)}
                 </span>
               </div>
+
+              {checkoutAberto.checkoutUrl?.startsWith("http") && (
+                <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3.5 space-y-2.5">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldCheck className="size-5 text-blue-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">
+                        Página Oficial de Pagamento
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Pague com Pix, Cartão de Crédito ou Boleto com segurança.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    className="w-full h-10 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2 text-xs shadow-xs"
+                    onClick={() => {
+                      if (checkoutAberto.checkoutUrl) {
+                        window.location.href = checkoutAberto.checkoutUrl;
+                      }
+                    }}
+                  >
+                    <span>Abrir Página de Pagamento</span>
+                    <ExternalLink className="size-3.5" />
+                  </Button>
+                </div>
+              )}
 
               <Tabs
                 value={abaPagamento}
@@ -674,116 +748,151 @@ function PaginaPlano() {
 
                 {/* ABA 2: CARTÃO DE CRÉDITO */}
                 <TabsContent value="cartao" className="space-y-3 pt-2">
-                  <div className="space-y-2.5 rounded-xl border border-border bg-card p-3.5 shadow-xs">
-                    <div className="space-y-1">
-                      <Label htmlFor="card-number" className="text-xs font-semibold">
-                        Número do Cartão
-                      </Label>
-                      <Input
-                        id="card-number"
-                        placeholder="0000 0000 0000 0000"
-                        maxLength={19}
-                        value={cartaoDados.numero}
-                        onChange={(e) => {
-                          const val = e.target.value
-                            .replace(/\D/g, "")
-                            .replace(/(\d{4})/g, "$1 ")
-                            .trim();
-                          setCartaoDados((prev) => ({ ...prev, numero: val }));
-                        }}
-                        className="font-mono text-xs h-9"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <Label htmlFor="card-name" className="text-xs font-semibold">
-                        Nome Impresso no Cartão
-                      </Label>
-                      <Input
-                        id="card-name"
-                        placeholder="NOME COMO NO CARTÃO"
-                        value={cartaoDados.nome}
-                        onChange={(e) =>
-                          setCartaoDados((prev) => ({
-                            ...prev,
-                            nome: e.target.value.toUpperCase(),
-                          }))
-                        }
-                        className="text-xs uppercase h-9"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <Label htmlFor="card-expiry" className="text-xs font-semibold">
-                          Validade
-                        </Label>
-                        <Input
-                          id="card-expiry"
-                          placeholder="MM/AA"
-                          maxLength={5}
-                          value={cartaoDados.validade}
-                          onChange={(e) => {
-                            let val = e.target.value.replace(/\D/g, "");
-                            if (val.length >= 2) val = `${val.slice(0, 2)}/${val.slice(2, 4)}`;
-                            setCartaoDados((prev) => ({ ...prev, validade: val }));
-                          }}
-                          className="font-mono text-xs h-9"
-                        />
+                  {checkoutAberto.checkoutUrl?.startsWith("http") ? (
+                    <div className="rounded-xl border border-border bg-card p-4 text-center space-y-3 shadow-xs">
+                      <CreditCard className="size-8 mx-auto text-blue-600" />
+                      <div>
+                        <p className="text-xs font-semibold text-foreground">
+                          Pagamento via Cartão de Crédito
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-1 max-w-sm mx-auto">
+                          Seu pagamento será processado com segurança diretamente na plataforma
+                          oficial com suporte a parcelamento e confirmação imediata.
+                        </p>
                       </div>
-
-                      <div className="space-y-1">
-                        <Label htmlFor="card-cvv" className="text-xs font-semibold">
-                          CVV
-                        </Label>
-                        <Input
-                          id="card-cvv"
-                          placeholder="123"
-                          maxLength={4}
-                          value={cartaoDados.cvv}
-                          onChange={(e) =>
-                            setCartaoDados((prev) => ({
-                              ...prev,
-                              cvv: e.target.value.replace(/\D/g, ""),
-                            }))
+                      <Button
+                        className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2 shadow-xs"
+                        onClick={() => {
+                          if (checkoutAberto.checkoutUrl) {
+                            window.location.href = checkoutAberto.checkoutUrl;
                           }
-                          className="font-mono text-xs h-9"
-                        />
+                        }}
+                      >
+                        <CreditCard className="size-4" />
+                        <span>Pagar {moeda(checkoutAberto.valor)}</span>
+                        <ExternalLink className="size-3.5" />
+                      </Button>
+                      <div className="flex items-center justify-center gap-1.5 text-muted-foreground text-[11px]">
+                        <Lock className="size-3 text-emerald-600" />
+                        <span>Ambiente seguro e criptografado</span>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <>
+                      <div className="space-y-2.5 rounded-xl border border-border bg-card p-3.5 shadow-xs">
+                        <div className="space-y-1">
+                          <Label htmlFor="card-number" className="text-xs font-semibold">
+                            Número do Cartão
+                          </Label>
+                          <Input
+                            id="card-number"
+                            placeholder="0000 0000 0000 0000"
+                            maxLength={19}
+                            value={cartaoDados.numero}
+                            onChange={(e) => {
+                              const val = e.target.value
+                                .replace(/\D/g, "")
+                                .replace(/(\d{4})/g, "$1 ")
+                                .trim();
+                              setCartaoDados((prev) => ({ ...prev, numero: val }));
+                            }}
+                            className="font-mono text-xs h-9"
+                          />
+                        </div>
 
-                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/40 border border-border text-muted-foreground text-[11px]">
-                    <Lock className="size-3.5 text-emerald-600 shrink-0" />
-                    <span>Ambiente criptografado com certificação PCI-DSS.</span>
-                  </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="card-name" className="text-xs font-semibold">
+                            Nome Impresso no Cartão
+                          </Label>
+                          <Input
+                            id="card-name"
+                            placeholder="NOME COMO NO CARTÃO"
+                            value={cartaoDados.nome}
+                            onChange={(e) =>
+                              setCartaoDados((prev) => ({
+                                ...prev,
+                                nome: e.target.value.toUpperCase(),
+                              }))
+                            }
+                            className="text-xs uppercase h-9"
+                          />
+                        </div>
 
-                  <Button
-                    className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2 shadow-xs"
-                    disabled={confirmarPagamento.isPending}
-                    onClick={() => {
-                      if (
-                        !cartaoDados.numero ||
-                        !cartaoDados.nome ||
-                        !cartaoDados.validade ||
-                        !cartaoDados.cvv
-                      ) {
-                        toast.error("Preencha todos os dados do cartão de crédito para continuar.");
-                        return;
-                      }
-                      confirmarPagamento.mutate({
-                        faturaId: checkoutAberto.faturaId,
-                        metodo: "cartao",
-                      });
-                    }}
-                  >
-                    {confirmarPagamento.isPending ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <CreditCard className="size-4" />
-                    )}
-                    <span>Pagar {moeda(checkoutAberto.valor)} no Cartão</span>
-                  </Button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label htmlFor="card-expiry" className="text-xs font-semibold">
+                              Validade
+                            </Label>
+                            <Input
+                              id="card-expiry"
+                              placeholder="MM/AA"
+                              maxLength={5}
+                              value={cartaoDados.validade}
+                              onChange={(e) => {
+                                let val = e.target.value.replace(/\D/g, "");
+                                if (val.length >= 2) val = `${val.slice(0, 2)}/${val.slice(2, 4)}`;
+                                setCartaoDados((prev) => ({ ...prev, validade: val }));
+                              }}
+                              className="font-mono text-xs h-9"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <Label htmlFor="card-cvv" className="text-xs font-semibold">
+                              CVV
+                            </Label>
+                            <Input
+                              id="card-cvv"
+                              placeholder="123"
+                              maxLength={4}
+                              value={cartaoDados.cvv}
+                              onChange={(e) =>
+                                setCartaoDados((prev) => ({
+                                  ...prev,
+                                  cvv: e.target.value.replace(/\D/g, ""),
+                                }))
+                              }
+                              className="font-mono text-xs h-9"
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/40 border border-border text-muted-foreground text-[11px]">
+                        <Lock className="size-3.5 text-emerald-600 shrink-0" />
+                        <span>Ambiente criptografado com certificação PCI-DSS.</span>
+                      </div>
+
+                      <Button
+                        className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2 shadow-xs"
+                        disabled={confirmarPagamento.isPending}
+                        onClick={() => {
+                          if (
+                            !cartaoDados.numero ||
+                            !cartaoDados.nome ||
+                            !cartaoDados.validade ||
+                            !cartaoDados.cvv
+                          ) {
+                            toast.error(
+                              "Preencha todos os dados do cartão de crédito para continuar.",
+                            );
+                            return;
+                          }
+                          confirmarPagamento.mutate({
+                            faturaId: checkoutAberto.faturaId,
+                            metodo: "cartao",
+                          });
+                        }}
+                      >
+                        {confirmarPagamento.isPending ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <CreditCard className="size-4" />
+                        )}
+                        <span>Pagar {moeda(checkoutAberto.valor)} no Cartão</span>
+                      </Button>
+                    </>
+                  )}
                 </TabsContent>
               </Tabs>
             </div>

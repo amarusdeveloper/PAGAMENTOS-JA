@@ -485,7 +485,71 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         }
       }
 
-      // Gera código Pix Copia e Cola padrão Banco Central do Brasil
+      // Consulta dados cadastrais da empresa para emissão real no Asaas
+      let empData: {
+        id: string;
+        nome: string;
+        cnpj: string | null;
+        email: string | null;
+        telefone: string | null;
+        razao_social: string | null;
+      } | null = null;
+      try {
+        const { data: emp } = await client
+          .from("empresas")
+          .select("id, nome, cnpj, email, telefone, razao_social")
+          .eq("id", empresaId)
+          .maybeSingle();
+        empData = emp;
+      } catch {
+        // ignora
+      }
+
+      let checkoutUrlReal: string | null = null;
+      let pixCopiaColaReal: string | null = null;
+
+      // Criação real da fatura no Asaas com link de checkout oficial
+      try {
+        const { garantirClienteAsaas, criarCobrancaAsaas, obterPixQrCode } =
+          await import("./asaas.server");
+        const docLimpo = (empData?.cnpj || "").replace(/\D/g, "");
+        const clienteAsaasId = await garantirClienteAsaas({
+          nome: empData?.razao_social || empData?.nome || "Agência Já",
+          cpfCnpj: docLimpo || undefined,
+          email: empData?.email || null,
+          telefone: empData?.telefone || null,
+          referenciaExterna: empresaId,
+        });
+
+        const cobrancaAsaas = await criarCobrancaAsaas({
+          clienteAsaasId,
+          valor: plano.mensalidade,
+          forma: "cartao", // Gera como UNDEFINED no Asaas, permitindo Pix, Cartão de Crédito e Boleto na mesma fatura oficial
+          vencimento: vencimentoIso.split("T")[0]!,
+          descricao: `Assinatura Plano ${plano.nome} — Já Gestão`,
+          referenciaExterna: faturaId,
+        });
+
+        if (cobrancaAsaas.invoiceUrl) {
+          checkoutUrlReal = cobrancaAsaas.invoiceUrl;
+        }
+
+        if (cobrancaAsaas.id) {
+          const pixInfo = await obterPixQrCode(cobrancaAsaas.id);
+          if (pixInfo.payload) {
+            pixCopiaColaReal = pixInfo.payload;
+          }
+        }
+      } catch (errAsaas) {
+        console.error("[selecionarPlanoEmpresa] Erro ao emitir no Asaas:", errAsaas);
+        throw new Error(
+          errAsaas instanceof Error
+            ? `Erro ao gerar fatura no Asaas: ${errAsaas.message}`
+            : "Falha na comunicação com o Asaas.",
+        );
+      }
+
+      // Gera código Pix Copia e Cola padrão Banco Central do Brasil como fallback
       const pixChave = "financeiro@swali.com.br";
       const nomeBeneficiario = "JA PLATAFORMA";
       const cidade = "SAO PAULO";
@@ -506,13 +570,13 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         }
       }
       const crcHex = (crc & 0xffff).toString(16).toUpperCase().padStart(4, "0");
-      const pixCopiaCola = `${payloadBase}${crcHex}`;
+      const pixCopiaColaFallback = `${payloadBase}${crcHex}`;
 
       cobrancaInfo = {
         faturaId,
         valor: plano.mensalidade,
-        pixCopiaCola,
-        checkoutUrl: `/plano?fatura=${faturaId}`,
+        pixCopiaCola: pixCopiaColaReal || pixCopiaColaFallback,
+        checkoutUrl: checkoutUrlReal || `/plano?fatura=${faturaId}`,
         vencimento: vencimentoIso,
       };
     }
