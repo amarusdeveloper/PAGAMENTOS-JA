@@ -401,7 +401,7 @@ function DetalheEvento() {
 
   const e = evento.data;
   const proximo = proximoStatus(e.status);
-  const tokenAtivo = sincronizacaoPonto.data?.signedToken || e.qr_code_token;
+  const tokenAtivo = e.qr_code_token || sincronizacaoPonto.data?.signedToken;
   const urlPonto =
     typeof window !== "undefined" ? `${window.location.origin}/ponto/${tokenAtivo}` : "";
 
@@ -574,6 +574,20 @@ function DetalheEvento() {
                   <RefreshCw className="size-4" /> Trocar QR
                 </Button>
               </div>
+
+              {typeof window !== "undefined" &&
+              (window.location.hostname === "localhost" ||
+                window.location.hostname === "127.0.0.1") ? (
+                <div className="mt-4 rounded-md border border-amber-500/30 bg-amber-500/10 p-2.5 text-xs text-amber-800 dark:text-amber-200">
+                  <p className="font-semibold">Aviso de teste local (localhost):</p>
+                  <p className="mt-0.5 leading-relaxed">
+                    Você está no computador em <code>localhost</code>. Para escanear o QR Code no
+                    celular, acesse este painel pelo IP da sua rede (ex:{" "}
+                    <code>http://192.168.x.x:3000</code>) ou pelo link público da sua publicação na
+                    Vercel.
+                  </p>
+                </div>
+              ) : null}
             </div>
           </div>
         </TabsContent>

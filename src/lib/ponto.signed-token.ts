@@ -80,11 +80,12 @@ export function criarTokenQrCodeAssinado(
  * Decodifica e valida a assinatura criptográfica e a expiração do token de QR Code.
  */
 export function decodificarTokenQrCode(token: string): PayloadQrCodePonto | null {
-  if (!token || !token.startsWith("qr.")) {
+  if (!token || (!token.startsWith("qr.") && !token.startsWith("qr_"))) {
     return null;
   }
 
-  const partes = token.split(".");
+  const delimiter = token.startsWith("qr_") ? "_" : ".";
+  const partes = token.split(delimiter);
   if (partes.length !== 3) {
     return null;
   }

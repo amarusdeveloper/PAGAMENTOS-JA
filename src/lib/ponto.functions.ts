@@ -25,6 +25,20 @@ const identificarSchema = tokenSchema.extend({
   cpf: z.string().regex(/^\d{11}$/, "CPF deve ter 11 dígitos"),
 });
 
+const evidenciaLivenessSchema = z
+  .object({
+    sessaoId: z.string().optional(),
+    desafioConcluido: z.boolean().optional(),
+    duracaoTotalMs: z.number().optional(),
+    earMedioAberto: z.number().optional(),
+    earMinimoFechado: z.number().optional(),
+    duracaoPiscada1Ms: z.number().optional(),
+    duracaoPiscada2Ms: z.number().optional(),
+    scoreNitidez: z.number().optional(),
+    timestampConclusao: z.string().optional(),
+  })
+  .optional();
+
 const registrarSchema = identificarSchema.extend({
   escalaId: z.string().uuid(),
   tipo: z.enum(["entrada", "saida", "inicio_intervalo", "fim_intervalo"]),
@@ -32,6 +46,7 @@ const registrarSchema = identificarSchema.extend({
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),
   consentiuSelfie: z.boolean().optional(),
+  evidenciaLiveness: evidenciaLivenessSchema,
 });
 
 const contextoSchema = z.object({
@@ -324,11 +339,26 @@ export const obterContextoPonto = createServerFn({ method: "GET" })
       };
     }
 
-    // 3. Tenta Edge Function se disponível no Supabase
+    // 3. Tenta RPC SECURITY DEFINER no Supabase (não requer service_role no Vercel)
+    try {
+      const supabase = createSupabasePublicClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)(
+        "obter_contexto_ponto_por_token",
+        { _token: data.token },
+      );
+      if (!rpcError && rpcData && typeof rpcData === "object") {
+        return contextoSchema.parse(rpcData);
+      }
+    } catch {
+      // continua para os próximos fallbacks
+    }
+
+    // 4. Tenta Edge Function se disponível no Supabase
     try {
       return await invokePontoEdge({ action: "contexto", token: data.token }, contextoSchema);
     } catch {
-      // 4. Fallback nativo server-side
+      // 5. Fallback nativo server-side
       const supabase = createSupabasePublicClient();
       const { data: evento, error: erroEvento } = await supabase
         .from("eventos")
@@ -383,13 +413,40 @@ export const obterContextoPonto = createServerFn({ method: "GET" })
 export const identificarNoPonto = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
-    // 1. Tenta Edge Function se disponível
+    // 1. Tenta RPC SECURITY DEFINER no Supabase
+    try {
+      const supabase = createSupabasePublicClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)(
+        "identificar_no_ponto_publico",
+        { _token: data.token, _cpf: data.cpf },
+      );
+      if (!rpcError && rpcData && typeof rpcData === "object") {
+        return identificacaoResultSchema.parse(rpcData);
+      }
+      if (rpcError && rpcError.message) {
+        const msg = rpcError.message;
+        if (!msg.includes("function") && !msg.includes("does not exist")) {
+          throw new Error(msg);
+        }
+      }
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        !e.message.includes("function") &&
+        !e.message.includes("does not exist")
+      ) {
+        throw e;
+      }
+    }
+
+    // 2. Tenta Edge Function se disponível
     try {
       return await invokePontoEdge({ action: "identificar", ...data }, identificacaoResultSchema);
     } catch {
       const cpfLimpo = data.cpf.replace(/\D/g, "");
 
-      // 2. Tenta resolver via sessão ativa do evento no servidor
+      // 3. Tenta resolver via sessão ativa do evento no servidor
       const sessao = buscarSessaoEventoPorToken(data.token);
       if (sessao) {
         validarValidadeQr({
@@ -542,6 +599,21 @@ export const identificarNoPonto = createServerFn({ method: "POST" })
 export const confirmarPresenca = createServerFn({ method: "POST" })
   .validator((input: unknown) => identificarSchema.parse(input))
   .handler(async ({ data }) => {
+    // 1. Tenta RPC SECURITY DEFINER no Supabase
+    try {
+      const supabase = createSupabasePublicClient();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)(
+        "confirmar_presenca_ponto_publico",
+        { _token: data.token, _cpf: data.cpf },
+      );
+      if (!rpcError && rpcData) {
+        return { ok: true as const };
+      }
+    } catch {
+      // continua para os próximos fallbacks
+    }
+
     try {
       return await invokePontoEdge(
         { action: "confirmar", ...data },
@@ -577,6 +649,71 @@ export const confirmarPresenca = createServerFn({ method: "POST" })
 export const registrarPonto = createServerFn({ method: "POST" })
   .validator((input: unknown) => registrarSchema.parse(input))
   .handler(async ({ data }) => {
+    // 1. Tenta RPC SECURITY DEFINER no Supabase
+    try {
+      const supabase = createSupabasePublicClient();
+      let fotoUrl: string | null = null;
+      if (data.fotoBase64) {
+        try {
+          const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
+            data.fotoBase64,
+          );
+          if (partesFoto) {
+            const formato = partesFoto[1];
+            const bytes = Uint8Array.from(Buffer.from(partesFoto[2]!, "base64"));
+            const caminho = `publico/${data.escalaId}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
+            const { error: erroUpload } = await supabase.storage
+              .from("selfies-ponto")
+              .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
+            if (!erroUpload) {
+              fotoUrl = caminho;
+            } else {
+              fotoUrl = data.fotoBase64;
+            }
+          } else {
+            fotoUrl = data.fotoBase64;
+          }
+        } catch {
+          fotoUrl = data.fotoBase64;
+        }
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: rpcData, error: rpcError } = await (supabase.rpc as any)(
+        "registrar_ponto_publico",
+        {
+          _token: data.token,
+          _cpf: data.cpf,
+          _escala_id: data.escalaId,
+          _tipo: data.tipo,
+          _foto_url: fotoUrl,
+          _gps_lat: data.lat ?? null,
+          _gps_lng: data.lng ?? null,
+          _consentiu_selfie: Boolean(data.consentiuSelfie),
+        },
+      );
+      if (!rpcError && rpcData && typeof rpcData === "object" && "ok" in rpcData) {
+        return {
+          ok: true as const,
+          foraHorario: Boolean((rpcData as { foraHorario?: boolean }).foraHorario),
+        };
+      }
+      if (rpcError && rpcError.message) {
+        const msg = rpcError.message;
+        if (!msg.includes("function") && !msg.includes("does not exist")) {
+          throw new Error(msg);
+        }
+      }
+    } catch (e) {
+      if (
+        e instanceof Error &&
+        !e.message.includes("function") &&
+        !e.message.includes("does not exist")
+      ) {
+        throw e;
+      }
+    }
+
     try {
       return await invokePontoEdge(
         { action: "registrar", ...data },
@@ -640,20 +777,31 @@ export const registrarPonto = createServerFn({ method: "POST" })
 
             // Upload de selfie se fornecida
             if (data.fotoBase64) {
-              const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
-                data.fotoBase64,
-              );
-              if (partesFoto) {
-                const formato = partesFoto[1];
-                const bytes = Uint8Array.from(Buffer.from(partesFoto[2]!, "base64"));
-                const caminho = `${sessao.empresaId}/${data.escalaId}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
-                const { error: erroUpload } = await authClient.storage
-                  .from("selfies-ponto")
-                  .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
-                if (!erroUpload) {
-                  fotoUrl = caminho;
+              try {
+                const partesFoto = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(
+                  data.fotoBase64,
+                );
+                if (partesFoto) {
+                  const formato = partesFoto[1];
+                  const bytes = Uint8Array.from(Buffer.from(partesFoto[2]!, "base64"));
+                  const caminho = `${sessao.empresaId}/${data.escalaId}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
+                  const { error: erroUpload } = await authClient.storage
+                    .from("selfies-ponto")
+                    .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
+                  if (!erroUpload) {
+                    fotoUrl = caminho;
+                  } else {
+                    fotoUrl = data.fotoBase64;
+                  }
+                } else {
+                  fotoUrl = data.fotoBase64;
                 }
+              } catch {
+                fotoUrl = data.fotoBase64;
               }
+            }
+            if (!fotoUrl && data.fotoBase64) {
+              fotoUrl = data.fotoBase64;
             }
 
             const { data: pontoGravado } = await authClient
@@ -682,6 +830,39 @@ export const registrarPonto = createServerFn({ method: "POST" })
           } catch (syncErr) {
             console.warn("[ponto] Gravação direta falhou, salvando na sessão:", syncErr);
           }
+        }
+
+        // Se ainda não gravou no banco e houver chave administrativa disponível, grava via admin
+        try {
+          const { hasAdminKey, supabaseAdmin } =
+            await import("@/integrations/supabase/client.server");
+          if (hasAdminKey()) {
+            const { data: adminPonto } = await supabaseAdmin
+              .from("pontos")
+              .insert({
+                escala_id: data.escalaId,
+                tipo: data.tipo,
+                metodo: data.fotoBase64 ? "selfie" : "qrcode",
+                registrado_em: agoraIso,
+                foto_url: fotoUrl,
+                gps_lat: data.lat ?? null,
+                gps_lng: data.lng ?? null,
+                status: "pendente",
+                fora_horario: foraHorario,
+                selfie_consentimento_aceito_em: data.fotoBase64 ? agoraIso : null,
+                selfie_expira_em: data.fotoBase64
+                  ? new Date(agora.getTime() + 90 * 24 * 60 * 60_000).toISOString()
+                  : null,
+              })
+              .select("id")
+              .maybeSingle();
+
+            if (adminPonto?.id) {
+              novoId = adminPonto.id;
+            }
+          }
+        } catch {
+          // Continua com fallback na sessão
         }
 
         adicionarPontoSessao(data.token, {

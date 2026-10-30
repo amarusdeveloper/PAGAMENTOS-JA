@@ -33,6 +33,14 @@ export default defineConfig({
           : "rutmjtmirwcyoroyjqdy",
       ),
     },
+    server: {
+      host: true,
+      allowedHosts: true,
+    },
+    preview: {
+      host: true,
+      allowedHosts: true,
+    },
     optimizeDeps: {
       exclude: ["@tanstack/start-server-core"],
     },

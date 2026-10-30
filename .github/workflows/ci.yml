@@ -22,10 +22,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: "npm"
 
-      - name: Instalar Dependências Estritas
-        run: npm ci
+      - name: Instalar Dependências
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci || npm install
+          else
+            npm install
+          fi
 
       - name: Análise Estática de Código (ESLint)
         run: npm run lint

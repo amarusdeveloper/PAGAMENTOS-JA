@@ -33,28 +33,49 @@ function createSupabaseFetch(supabaseKey: string): typeof fetch {
 }
 
 function isServiceRoleKey(value: string): boolean {
-  if (value.startsWith("sb_secret_")) return true;
+  const clean = value.trim().replace(/^["']|["']$/g, "");
+  if (clean.startsWith("sb_secret_")) return true;
 
-  const payload = value.split(".")[1];
-  if (!payload) return false;
-
-  try {
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as {
-      role?: unknown;
-    };
-    return claims.role === "service_role";
-  } catch {
-    return false;
+  const parts = clean.split(".");
+  const part1 = parts[1];
+  if (parts.length === 3 && part1) {
+    try {
+      let json = "";
+      if (typeof Buffer !== "undefined") {
+        json = Buffer.from(part1, "base64url").toString("utf8");
+      } else {
+        const base64 = part1.replace(/-/g, "+").replace(/_/g, "/");
+        json = atob(base64);
+      }
+      const claims = JSON.parse(json) as { role?: unknown };
+      return claims.role === "service_role";
+    } catch {
+      return false;
+    }
   }
+
+  return false;
 }
 
 function createSupabaseAdminClient() {
-  const rawUrl = process.env["SUPABASE_URL"] || process.env["VITE_SUPABASE_URL"];
-  if (!rawUrl) {
-    throw new Error("Variável SUPABASE_URL ausente na configuração do servidor.");
-  }
+  const rawUrl = (
+    process.env["SUPABASE_URL"] ||
+    process.env["VITE_SUPABASE_URL"] ||
+    "https://rutmjtmirwcyoroyjqdy.supabase.co"
+  )
+    .trim()
+    .replace(/^["']|["']$/g, "");
 
-  const rawKey = process.env["SUPABASE_SERVICE_ROLE_KEY"] || process.env["SUPABASE_KEY"];
+  const rawKey = (
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["SUPABASE_SERVICE_KEY"] ||
+    process.env["SUPABASE_KEY"] ||
+    process.env["SERVICE_ROLE_KEY"] ||
+    ""
+  )
+    .trim()
+    .replace(/^["']|["']$/g, "");
+
   if (!rawKey || !isServiceRoleKey(rawKey)) {
     throw new Error(
       "Chave administrativa do Supabase ausente ou inválida. Configure SUPABASE_SERVICE_ROLE_KEY com a chave service_role ou sb_secret_ na Vercel e faça um novo deploy.",
@@ -71,6 +92,19 @@ function createSupabaseAdminClient() {
       autoRefreshToken: false,
     },
   });
+}
+
+export function hasAdminKey(): boolean {
+  const rawKey = (
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["SUPABASE_SERVICE_KEY"] ||
+    process.env["SUPABASE_KEY"] ||
+    process.env["SERVICE_ROLE_KEY"] ||
+    ""
+  )
+    .trim()
+    .replace(/^["']|["']$/g, "");
+  return Boolean(rawKey && isServiceRoleKey(rawKey));
 }
 
 let _supabaseAdmin: ReturnType<typeof createSupabaseAdminClient> | undefined;

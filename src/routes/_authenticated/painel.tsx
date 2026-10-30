@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useServerFn } from "@tanstack/react-start";
 import {
   ArrowUpRight,
   CalendarDays,
@@ -192,10 +193,12 @@ function Painel() {
     refetchInterval: 30_000,
   });
 
+  const carregarCobrancaFn = useServerFn(carregarCobranca);
+
   const cobranca = useQuery({
     queryKey: ["cobranca-v2", empresaId],
     enabled: Boolean(empresaId),
-    queryFn: () => carregarCobranca(),
+    queryFn: () => carregarCobrancaFn(),
     refetchInterval: 30_000,
   });
 
@@ -314,15 +317,15 @@ function Painel() {
               <span>{ROTULO_PAPEL[sessao.papeis[0]!]}</span>
             </>
           ) : null}
-          {cobranca.data ? (
+          {cobranca.data?.uso ? (
             <>
               <span aria-hidden="true" className="text-border">
                 ·
               </span>
               <span>
                 {cobranca.data.uso.plano_codigo === "free"
-                  ? `Plano ${cobranca.data.uso.plano_nome} (${cobranca.data.uso.eventos_usados}/${cobranca.data.uso.limite_eventos} eventos)`
-                  : `Plano ${cobranca.data.uso.plano_nome} (${cobranca.data.uso.participacoes_usadas} participações)`}
+                  ? `Plano ${cobranca.data.uso.plano_nome ?? "Gratuito"} (${cobranca.data.uso.eventos_usados ?? 0}/${cobranca.data.uso.limite_eventos ?? 1} eventos)`
+                  : `Plano ${cobranca.data.uso.plano_nome ?? "Pro"} (${cobranca.data.uso.participacoes_usadas ?? 0} participações)`}
               </span>
             </>
           ) : null}

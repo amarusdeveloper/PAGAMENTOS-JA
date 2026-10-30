@@ -161,3 +161,39 @@ export function atualizarStatusEscalaSessao(
     salvarNoDisco();
   }
 }
+
+export function atualizarAuthHeaderSessao(eventoId: string, authHeader: string): void {
+  const sessao = sessoesPorEventoId.get(eventoId);
+  if (sessao) {
+    sessao.authHeader = authHeader;
+    sessao.atualizadoEm = Date.now();
+    salvarNoDisco();
+  }
+}
+
+export function atualizarStatusPontoSessao(
+  escalaId: string,
+  pontoId: string,
+  status: string,
+  _motivo?: string | null,
+): void {
+  for (const sessao of sessoesPorEventoId.values()) {
+    const ponto = sessao.pontos.find(
+      (p) => p.id === pontoId || (p.escalaId === escalaId && p.id === pontoId),
+    );
+    if (ponto) {
+      ponto.status = status;
+      sessao.atualizadoEm = Date.now();
+      salvarNoDisco();
+      return;
+    }
+  }
+}
+
+export function obterPontosSessaoPorEscalaId(escalaId: string): PontoSessao[] {
+  for (const sessao of sessoesPorEventoId.values()) {
+    const pontos = sessao.pontos.filter((p) => p.escalaId === escalaId);
+    if (pontos.length > 0) return pontos;
+  }
+  return [];
+}

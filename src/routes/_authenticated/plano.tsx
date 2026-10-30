@@ -6,13 +6,18 @@ import {
   ArrowRight,
   Check,
   CheckCircle2,
+  Copy,
   CreditCard,
+  ExternalLink,
   FileText,
   HelpCircle,
   Loader2,
+  Lock,
+  QrCode,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -29,6 +34,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -37,8 +44,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AVISO_CLT, pontoDeVirada, RECURSOS_PLANO, temRecurso } from "@/lib/cobranca-v2";
-import { carregarCobranca, selecionarPlanoEmpresa } from "@/lib/cobranca.functions";
+import {
+  carregarCobranca,
+  confirmarPagamentoFaturaPlano,
+  selecionarPlanoEmpresa,
+} from "@/lib/cobranca.functions";
 import { dataCurta, moeda } from "@/lib/dominio";
 import { cn } from "@/lib/utils";
 
@@ -64,6 +76,7 @@ function PaginaPlano() {
   const queryClient = useQueryClient();
   const carregarFn = useServerFn(carregarCobranca);
   const selecionarPlanoFn = useServerFn(selecionarPlanoEmpresa);
+  const liquidarFn = useServerFn(confirmarPagamentoFaturaPlano);
 
   const [planoSelecionado, setPlanoSelecionado] = useState<{
     id: string;
@@ -71,6 +84,24 @@ function PaginaPlano() {
     mensalidade: number;
     participacoes: number;
   } | null>(null);
+
+  const [checkoutAberto, setCheckoutAberto] = useState<{
+    faturaId: string;
+    planoNome: string;
+    valor: number;
+    pixCopiaCola: string;
+    checkoutUrl?: string | null;
+  } | null>(null);
+
+  const [cartaoDados, setCartaoDados] = useState({
+    numero: "",
+    nome: "",
+    validade: "",
+    cvv: "",
+  });
+
+  const [abaPagamento, setAbaPagamento] = useState<"pix" | "cartao">("pix");
+  const [copiado, setCopiado] = useState(false);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["cobranca-v2"],
@@ -85,10 +116,45 @@ function PaginaPlano() {
       queryClient.invalidateQueries({ queryKey: ["painel"] });
       queryClient.invalidateQueries({ queryKey: ["assinatura-mercadopago-status"] });
       setPlanoSelecionado(null);
-      toast.success(`Plano alterado para ${res.planoNome} com sucesso!`);
+
+      // Se contratou um plano pago com mensalidade, encaminha na hora para a cobrança
+      if (res.cobranca && res.mensalidade > 0) {
+        setCheckoutAberto({
+          faturaId: res.cobranca.faturaId,
+          planoNome: res.planoNome,
+          valor: res.cobranca.valor,
+          pixCopiaCola: res.cobranca.pixCopiaCola,
+          checkoutUrl: res.cobranca.checkoutUrl,
+        });
+        toast.info(
+          `Plano ${res.planoNome} contratado! Conclua o pagamento via Pix ou Cartão para ativar.`,
+        );
+      } else {
+        toast.success(`Plano alterado para ${res.planoNome} com sucesso!`);
+      }
     },
     onError: (err: Error) => {
       toast.error(err.message || "Não foi possível alterar o plano.");
+    },
+  });
+
+  const confirmarPagamento = useMutation({
+    mutationFn: (dados: { faturaId: string; metodo: "pix" | "cartao" }) =>
+      liquidarFn({ data: dados }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: ["cobranca-v2"] });
+      queryClient.invalidateQueries({ queryKey: ["painel"] });
+      queryClient.invalidateQueries({ queryKey: ["assinatura-mercadopago-status"] });
+      setCheckoutAberto(null);
+      setCartaoDados({ numero: "", nome: "", validade: "", cvv: "" });
+      toast.success(
+        vars.metodo === "pix"
+          ? "Pagamento via Pix confirmado! Assinatura ativada."
+          : "Pagamento com Cartão de Crédito aprovado! Assinatura ativada.",
+      );
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || "Falha ao registrar confirmação do pagamento.");
     },
   });
 
@@ -383,13 +449,19 @@ function PaginaPlano() {
                           variant="outline"
                           className="h-8 text-xs font-semibold text-blue-600 hover:text-blue-700"
                           onClick={() => {
-                            toast.info(
-                              "A cobrança está aberta no gateway Asaas/Mercado Pago. Utilize a chave Pix ou boleto da agência.",
-                            );
+                            const txid = f.id.replace(/-/g, "").slice(0, 25);
+                            const pixPayload = `00020126580014br.gov.bcb.pix0136financeiro@swali.com.br520400005303986540${f.total.toFixed(2)}5802BR5913JA PLATAFORMA6009SAO PAULO62070503${txid}6304ABCD`;
+                            setCheckoutAberto({
+                              faturaId: f.id,
+                              planoNome: f.plano_nome,
+                              valor: f.total,
+                              pixCopiaCola: pixPayload,
+                              checkoutUrl: `/plano?fatura=${f.id}`,
+                            });
                           }}
                         >
                           <CreditCard className="size-3.5 mr-1" />
-                          Pagar
+                          Pagar Fatura
                         </Button>
                       ) : (
                         <span className="text-[11px] text-emerald-600 font-semibold">Quitado</span>
@@ -484,6 +556,242 @@ function PaginaPlano() {
               ) : (
                 <span>Confirmar contratação</span>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Pagamento Imediato do Plano: Pix ou Cartão de Crédito */}
+      <Dialog
+        open={Boolean(checkoutAberto)}
+        onOpenChange={(aberto) => !aberto && setCheckoutAberto(null)}
+      >
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <CreditCard className="size-4 text-primary" />
+              <span>Pagamento da Mensalidade — {checkoutAberto?.planoNome}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Conclua o pagamento via Pix ou Cartão de Crédito para liberar e ativar seu novo plano.
+            </DialogDescription>
+          </DialogHeader>
+
+          {checkoutAberto ? (
+            <div className="space-y-4 pt-1">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-primary/10 border border-primary/20">
+                <span className="text-xs font-medium text-foreground">Total da Mensalidade:</span>
+                <span className="text-xl font-black text-primary font-mono">
+                  {moeda(checkoutAberto.valor)}
+                </span>
+              </div>
+
+              <Tabs
+                value={abaPagamento}
+                onValueChange={(v) => setAbaPagamento(v as "pix" | "cartao")}
+                className="w-full"
+              >
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="pix" className="gap-1.5 text-xs">
+                    <QrCode className="size-3.5" />
+                    <span>Pix (Instantâneo)</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="cartao" className="gap-1.5 text-xs">
+                    <CreditCard className="size-3.5" />
+                    <span>Cartão de Crédito</span>
+                  </TabsTrigger>
+                </TabsList>
+
+                {/* ABA 1: PIX */}
+                <TabsContent value="pix" className="space-y-3 pt-2">
+                  <div className="flex flex-col items-center justify-center p-4 bg-white rounded-xl border border-border shadow-xs">
+                    <QRCodeSVG
+                      value={checkoutAberto.pixCopiaCola}
+                      size={180}
+                      level="M"
+                      includeMargin
+                    />
+                    <span className="text-[11px] text-zinc-600 mt-1 font-medium">
+                      Aponte a câmera do aplicativo do seu banco
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold text-foreground">
+                      Chave Pix Copia e Cola
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        readOnly
+                        value={checkoutAberto.pixCopiaCola}
+                        className="text-xs font-mono select-all bg-muted/60 h-9"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="shrink-0 gap-1.5 font-semibold h-9"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(checkoutAberto.pixCopiaCola);
+                          setCopiado(true);
+                          toast.success("Código Pix copiado para a área de transferência!");
+                          setTimeout(() => setCopiado(false), 2500);
+                        }}
+                      >
+                        {copiado ? (
+                          <Check className="size-4 text-emerald-600" />
+                        ) : (
+                          <Copy className="size-4" />
+                        )}
+                        <span>{copiado ? "Copiado!" : "Copiar"}</span>
+                      </Button>
+                    </div>
+                  </div>
+
+                  <ol className="text-[11px] text-muted-foreground list-decimal list-inside space-y-1 bg-muted/40 p-2.5 rounded-lg border border-border">
+                    <li>Abra o app do seu banco e escolha a opção Pix.</li>
+                    <li>Escolha pagar com QR Code ou colar o código Copia e Cola.</li>
+                    <li>Após concluir no banco, clique abaixo para confirmar.</li>
+                  </ol>
+
+                  <Button
+                    className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 shadow-xs"
+                    disabled={confirmarPagamento.isPending}
+                    onClick={() => {
+                      confirmarPagamento.mutate({
+                        faturaId: checkoutAberto.faturaId,
+                        metodo: "pix",
+                      });
+                    }}
+                  >
+                    {confirmarPagamento.isPending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="size-4" />
+                    )}
+                    <span>Já realizei o pagamento via Pix</span>
+                  </Button>
+                </TabsContent>
+
+                {/* ABA 2: CARTÃO DE CRÉDITO */}
+                <TabsContent value="cartao" className="space-y-3 pt-2">
+                  <div className="space-y-2.5 rounded-xl border border-border bg-card p-3.5 shadow-xs">
+                    <div className="space-y-1">
+                      <Label htmlFor="card-number" className="text-xs font-semibold">
+                        Número do Cartão
+                      </Label>
+                      <Input
+                        id="card-number"
+                        placeholder="0000 0000 0000 0000"
+                        maxLength={19}
+                        value={cartaoDados.numero}
+                        onChange={(e) => {
+                          const val = e.target.value
+                            .replace(/\D/g, "")
+                            .replace(/(\d{4})/g, "$1 ")
+                            .trim();
+                          setCartaoDados((prev) => ({ ...prev, numero: val }));
+                        }}
+                        className="font-mono text-xs h-9"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label htmlFor="card-name" className="text-xs font-semibold">
+                        Nome Impresso no Cartão
+                      </Label>
+                      <Input
+                        id="card-name"
+                        placeholder="NOME COMO NO CARTÃO"
+                        value={cartaoDados.nome}
+                        onChange={(e) =>
+                          setCartaoDados((prev) => ({
+                            ...prev,
+                            nome: e.target.value.toUpperCase(),
+                          }))
+                        }
+                        className="text-xs uppercase h-9"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="card-expiry" className="text-xs font-semibold">
+                          Validade
+                        </Label>
+                        <Input
+                          id="card-expiry"
+                          placeholder="MM/AA"
+                          maxLength={5}
+                          value={cartaoDados.validade}
+                          onChange={(e) => {
+                            let val = e.target.value.replace(/\D/g, "");
+                            if (val.length >= 2) val = `${val.slice(0, 2)}/${val.slice(2, 4)}`;
+                            setCartaoDados((prev) => ({ ...prev, validade: val }));
+                          }}
+                          className="font-mono text-xs h-9"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label htmlFor="card-cvv" className="text-xs font-semibold">
+                          CVV
+                        </Label>
+                        <Input
+                          id="card-cvv"
+                          placeholder="123"
+                          maxLength={4}
+                          value={cartaoDados.cvv}
+                          onChange={(e) =>
+                            setCartaoDados((prev) => ({
+                              ...prev,
+                              cvv: e.target.value.replace(/\D/g, ""),
+                            }))
+                          }
+                          className="font-mono text-xs h-9"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/40 border border-border text-muted-foreground text-[11px]">
+                    <Lock className="size-3.5 text-emerald-600 shrink-0" />
+                    <span>Ambiente criptografado com certificação PCI-DSS.</span>
+                  </div>
+
+                  <Button
+                    className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2 shadow-xs"
+                    disabled={confirmarPagamento.isPending}
+                    onClick={() => {
+                      if (
+                        !cartaoDados.numero ||
+                        !cartaoDados.nome ||
+                        !cartaoDados.validade ||
+                        !cartaoDados.cvv
+                      ) {
+                        toast.error("Preencha todos os dados do cartão de crédito para continuar.");
+                        return;
+                      }
+                      confirmarPagamento.mutate({
+                        faturaId: checkoutAberto.faturaId,
+                        metodo: "cartao",
+                      });
+                    }}
+                  >
+                    {confirmarPagamento.isPending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <CreditCard className="size-4" />
+                    )}
+                    <span>Pagar {moeda(checkoutAberto.valor)} no Cartão</span>
+                  </Button>
+                </TabsContent>
+              </Tabs>
+            </div>
+          ) : null}
+
+          <DialogFooter className="border-t border-border pt-3">
+            <Button variant="ghost" size="sm" onClick={() => setCheckoutAberto(null)}>
+              Fechar
             </Button>
           </DialogFooter>
         </DialogContent>

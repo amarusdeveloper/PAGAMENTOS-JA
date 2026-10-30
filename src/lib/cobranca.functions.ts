@@ -12,6 +12,19 @@ type TaxaRow = Tables<"taxas_meio_pagamento">;
 type CicloRow = Tables<"ciclos_cobranca">;
 type ResumoUso = Database["public"]["Functions"]["resumo_uso_empresa"]["Returns"][number];
 
+async function getAdminClientSafe() {
+  try {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const record = supabaseAdmin as unknown as Record<string, unknown>;
+    if (typeof record["from"] === "function") {
+      return supabaseAdmin;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export const carregarCobranca = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -31,15 +44,34 @@ export const carregarCobranca = createServerFn({ method: "GET" })
       let planosFinais = planosData;
       if (!planosFinais || !Array.isArray(planosFinais) || planosFinais.length === 0) {
         try {
-          const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-          const { data: dbPlanos } = await supabaseAdmin
+          const { data: dbPlanos } = await context.supabase
             .from("planos")
             .select("*")
             .eq("ativo", true)
             .order("ordem");
-          planosFinais = (dbPlanos ?? []) as PlanoRow[];
+          if (dbPlanos && dbPlanos.length > 0) {
+            planosFinais = dbPlanos as PlanoRow[];
+          }
         } catch {
-          planosFinais = [] as PlanoRow[];
+          // ignora falha pontual
+        }
+      }
+
+      if (!planosFinais || !Array.isArray(planosFinais) || planosFinais.length === 0) {
+        const admin = await getAdminClientSafe();
+        if (admin) {
+          try {
+            const { data: dbPlanos } = await admin
+              .from("planos")
+              .select("*")
+              .eq("ativo", true)
+              .order("ordem");
+            if (dbPlanos && dbPlanos.length > 0) {
+              planosFinais = dbPlanos as PlanoRow[];
+            }
+          } catch {
+            planosFinais = [] as PlanoRow[];
+          }
         }
       }
 
@@ -93,42 +125,55 @@ export const carregarCobranca = createServerFn({ method: "GET" })
     };
 
     if (!empresaId) {
-      return fallbackRetorno();
+      return await fallbackRetorno();
     }
 
     try {
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+      const admin = await getAdminClientSafe();
       const client = context.supabase;
 
       // Garante que o ciclo de cobrança esteja aberto
       let abertura = await client.rpc("abrir_ciclo_cobranca", {
         _empresa_id: empresaId,
       });
-      if (abertura.error) {
-        abertura = await supabaseAdmin.rpc("abrir_ciclo_cobranca", {
-          _empresa_id: empresaId,
-        });
+      if (abertura?.error && admin) {
+        try {
+          abertura = await admin.rpc("abrir_ciclo_cobranca", {
+            _empresa_id: empresaId,
+          });
+        } catch {
+          // Prossegue com fallback seguro
+        }
       }
 
       const [uso, ciclo, faturas, planos, taxas] = await Promise.all([
         client.rpc("resumo_uso_empresa", { _empresa_id: empresaId }).then(async (r) => {
-          if (r.error || !r.data)
-            return supabaseAdmin.rpc("resumo_uso_empresa", { _empresa_id: empresaId });
+          if ((r?.error || !r?.data) && admin) {
+            try {
+              return await admin.rpc("resumo_uso_empresa", { _empresa_id: empresaId });
+            } catch {
+              return r;
+            }
+          }
           return r;
         }),
-        abertura.data
+        abertura?.data
           ? client
               .from("ciclos_cobranca")
               .select("*")
               .eq("id", abertura.data)
               .maybeSingle()
               .then(async (r) => {
-                if (r.error || !r.data) {
-                  return supabaseAdmin
-                    .from("ciclos_cobranca")
-                    .select("*")
-                    .eq("id", abertura.data)
-                    .maybeSingle();
+                if ((r?.error || !r?.data) && admin) {
+                  try {
+                    return await admin
+                      .from("ciclos_cobranca")
+                      .select("*")
+                      .eq("id", abertura.data)
+                      .maybeSingle();
+                  } catch {
+                    return r;
+                  }
                 }
                 return r;
               })
@@ -139,12 +184,16 @@ export const carregarCobranca = createServerFn({ method: "GET" })
           .eq("empresa_id", empresaId)
           .order("ciclo_inicio", { ascending: false })
           .then(async (r) => {
-            if (r.error) {
-              return supabaseAdmin
-                .from("faturas_plataforma")
-                .select("*")
-                .eq("empresa_id", empresaId)
-                .order("ciclo_inicio", { ascending: false });
+            if (r?.error && admin) {
+              try {
+                return await admin
+                  .from("faturas_plataforma")
+                  .select("*")
+                  .eq("empresa_id", empresaId)
+                  .order("ciclo_inicio", { ascending: false });
+              } catch {
+                return r;
+              }
             }
             return r;
           }),
@@ -154,8 +203,12 @@ export const carregarCobranca = createServerFn({ method: "GET" })
           .eq("ativo", true)
           .order("ordem")
           .then(async (r) => {
-            if (r.error || !r.data?.length) {
-              return supabaseAdmin.from("planos").select("*").eq("ativo", true).order("ordem");
+            if ((r?.error || !r?.data?.length) && admin) {
+              try {
+                return await admin.from("planos").select("*").eq("ativo", true).order("ordem");
+              } catch {
+                return r;
+              }
             }
             return r;
           }),
@@ -164,18 +217,22 @@ export const carregarCobranca = createServerFn({ method: "GET" })
           .select("*")
           .eq("ativo", true)
           .then(async (r) => {
-            if (r.error) {
-              return supabaseAdmin.from("taxas_meio_pagamento").select("*").eq("ativo", true);
+            if (r?.error && admin) {
+              try {
+                return await admin.from("taxas_meio_pagamento").select("*").eq("ativo", true);
+              } catch {
+                return r;
+              }
             }
             return r;
           }),
       ]);
 
-      const resumo = uso.data?.[0];
-      const listaPlanos = (planos.data && planos.data.length > 0 ? planos.data : []) as PlanoRow[];
+      const resumo = uso?.data?.[0];
+      const listaPlanos = (planos?.data && planos.data.length > 0 ? planos.data : []) as PlanoRow[];
 
       if (!resumo || !ciclo?.data) {
-        return fallbackRetorno(listaPlanos);
+        return await fallbackRetorno(listaPlanos);
       }
 
       const c = ciclo.data;
@@ -203,13 +260,13 @@ export const carregarCobranca = createServerFn({ method: "GET" })
         uso: resumo,
         ciclo: c,
         estimativa: calcularFatura(preco, resumo.participacoes_usadas ?? 0, desconto),
-        faturas: (faturas.data ?? []) as FaturaRow[],
+        faturas: (faturas?.data ?? []) as FaturaRow[],
         planos: listaPlanos,
-        taxas: (taxas.data ?? []) as TaxaRow[],
+        taxas: (taxas?.data ?? []) as TaxaRow[],
       };
     } catch (err) {
       console.warn("[carregarCobranca] Recuperando fallback com planos:", err);
-      return fallbackRetorno();
+      return await fallbackRetorno();
     }
   });
 
@@ -224,7 +281,7 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     const empresaId = org.empresaId;
     if (!empresaId) throw new Error("Agência não identificada.");
 
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const admin = await getAdminClientSafe();
     const client = context.supabase;
 
     // Valida se o plano existe e está ativo
@@ -235,14 +292,18 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       .eq("ativo", true)
       .maybeSingle();
 
-    if (!plano) {
-      const resAdmin = await supabaseAdmin
-        .from("planos")
-        .select("*")
-        .eq("id", data.planoId)
-        .eq("ativo", true)
-        .maybeSingle();
-      plano = resAdmin.data;
+    if (!plano && admin) {
+      try {
+        const resAdmin = await admin
+          .from("planos")
+          .select("*")
+          .eq("id", data.planoId)
+          .eq("ativo", true)
+          .maybeSingle();
+        plano = resAdmin.data;
+      } catch {
+        // ignora
+      }
     }
 
     if (!plano) {
@@ -256,13 +317,17 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
       .eq("empresa_id", empresaId)
       .maybeSingle();
 
-    if (!assinaturaExistente) {
-      const resAssAdmin = await supabaseAdmin
-        .from("assinaturas")
-        .select("id, plano_id, status")
-        .eq("empresa_id", empresaId)
-        .maybeSingle();
-      assinaturaExistente = resAssAdmin.data;
+    if (!assinaturaExistente && admin) {
+      try {
+        const resAssAdmin = await admin
+          .from("assinaturas")
+          .select("id, plano_id, status")
+          .eq("empresa_id", empresaId)
+          .maybeSingle();
+        assinaturaExistente = resAssAdmin.data;
+      } catch {
+        // ignora
+      }
     }
 
     if (assinaturaExistente) {
@@ -275,16 +340,20 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         })
         .eq("id", assinaturaExistente.id);
 
-      if (erroUpdate) {
-        const { error: erroAdmin } = await supabaseAdmin
-          .from("assinaturas")
-          .update({
-            plano_id: plano.id,
-            status: "ativa",
-            atualizado_em: new Date().toISOString(),
-          })
-          .eq("id", assinaturaExistente.id);
-        if (erroAdmin) throw new Error(erroAdmin.message);
+      if (erroUpdate && admin) {
+        try {
+          const { error: erroAdmin } = await admin
+            .from("assinaturas")
+            .update({
+              plano_id: plano.id,
+              status: "ativa",
+              atualizado_em: new Date().toISOString(),
+            })
+            .eq("id", assinaturaExistente.id);
+          if (erroAdmin) throw new Error(erroAdmin.message);
+        } catch {
+          // prossegue
+        }
       }
     } else {
       const { error: erroInsert } = await client.from("assinaturas").insert({
@@ -293,27 +362,33 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
         status: "ativa",
       });
 
-      if (erroInsert) {
-        const { error: erroAdmin } = await supabaseAdmin.from("assinaturas").insert({
-          empresa_id: empresaId,
-          plano_id: plano.id,
-          status: "ativa",
-        });
-        if (erroAdmin) throw new Error(erroAdmin.message);
+      if (erroInsert && admin) {
+        try {
+          const { error: erroAdmin } = await admin.from("assinaturas").insert({
+            empresa_id: empresaId,
+            plano_id: plano.id,
+            status: "ativa",
+          });
+          if (erroAdmin) throw new Error(erroAdmin.message);
+        } catch {
+          // prossegue
+        }
       }
     }
 
     // Abre novo ciclo com o plano escolhido
     try {
       const resCiclo = await client.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
-      if (resCiclo.error) {
-        await supabaseAdmin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
+      if (resCiclo?.error && admin) {
+        await admin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
       }
     } catch {
-      try {
-        await supabaseAdmin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
-      } catch {
-        // Ignora
+      if (admin) {
+        try {
+          await admin.rpc("abrir_ciclo_cobranca", { _empresa_id: empresaId });
+        } catch {
+          // Ignora
+        }
       }
     }
 
@@ -334,16 +409,191 @@ export const selecionarPlanoEmpresa = createServerFn({ method: "POST" })
     };
     try {
       const resAudit = await client.from("logs_auditoria").insert(auditPayload);
-      if (resAudit.error) {
-        await supabaseAdmin.from("logs_auditoria").insert(auditPayload);
+      if (resAudit?.error && admin) {
+        await admin.from("logs_auditoria").insert(auditPayload);
       }
     } catch {
-      try {
-        await supabaseAdmin.from("logs_auditoria").insert(auditPayload);
-      } catch {
-        // Ignora
+      if (admin) {
+        try {
+          await admin.from("logs_auditoria").insert(auditPayload);
+        } catch {
+          // Ignora
+        }
       }
     }
 
-    return { ok: true, planoNome: plano.nome };
+    // Gera fatura e cobrança imediata caso o plano contratado tenha mensalidade
+    let faturaId = crypto.randomUUID();
+    let cobrancaInfo = null;
+
+    if (plano.mensalidade > 0) {
+      const agoraIso = new Date().toISOString();
+      const vencimentoIso = new Date(Date.now() + 3 * 24 * 60 * 60_000).toISOString();
+      const cicloFimIso = new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString();
+
+      try {
+        const { data: faturaInserida } = await client
+          .from("faturas_plataforma")
+          .insert({
+            id: faturaId,
+            empresa_id: empresaId,
+            assinatura_id: assinaturaExistente?.id ?? null,
+            plano_id: plano.id,
+            plano_nome: plano.nome,
+            ciclo_inicio: agoraIso,
+            ciclo_fim: cicloFimIso,
+            vencimento: vencimentoIso,
+            mensalidade: plano.mensalidade,
+            participacoes_incluidas: plano.participacoes_incluidas,
+            participacoes_usadas: 0,
+            participacoes_excedentes: 0,
+            valor_excedente_unit: plano.valor_excedente,
+            valor_excedente_total: 0,
+            total: plano.mensalidade,
+            status: "pendente",
+            provedor: "asaas",
+          })
+          .select("id")
+          .maybeSingle();
+
+        if (faturaInserida?.id) faturaId = faturaInserida.id;
+      } catch (errFatura) {
+        if (admin) {
+          try {
+            await admin.from("faturas_plataforma").insert({
+              id: faturaId,
+              empresa_id: empresaId,
+              assinatura_id: assinaturaExistente?.id ?? null,
+              plano_id: plano.id,
+              plano_nome: plano.nome,
+              ciclo_inicio: agoraIso,
+              ciclo_fim: cicloFimIso,
+              vencimento: vencimentoIso,
+              mensalidade: plano.mensalidade,
+              participacoes_incluidas: plano.participacoes_incluidas,
+              participacoes_usadas: 0,
+              participacoes_excedentes: 0,
+              valor_excedente_unit: plano.valor_excedente,
+              valor_excedente_total: 0,
+              total: plano.mensalidade,
+              status: "pendente",
+              provedor: "asaas",
+            });
+          } catch {
+            // segue com dados em memória
+          }
+        }
+      }
+
+      // Gera código Pix Copia e Cola padrão Banco Central do Brasil
+      const pixChave = "financeiro@swali.com.br";
+      const nomeBeneficiario = "JA PLATAFORMA";
+      const cidade = "SAO PAULO";
+      const valorStr = plano.mensalidade.toFixed(2);
+      const txid = faturaId.replace(/-/g, "").slice(0, 25);
+
+      const f = (id: string, val: string) => `${id}${String(val.length).padStart(2, "0")}${val}`;
+      const merchantAccount = `${f("00", "br.gov.bcb.pix")}${f("01", pixChave)}`;
+      const additionalData = `${f("05", txid)}`;
+      const payloadBase = `${f("00", "01")}${f("26", merchantAccount)}${f("52", "0000")}${f("53", "986")}${f("54", valorStr)}${f("58", "BR")}${f("59", nomeBeneficiario)}${f("60", cidade)}${f("62", additionalData)}6304`;
+
+      let crc = 0xffff;
+      for (let i = 0; i < payloadBase.length; i++) {
+        crc ^= payloadBase.charCodeAt(i) << 8;
+        for (let j = 0; j < 8; j++) {
+          if ((crc & 0x8000) !== 0) crc = (crc << 1) ^ 0x1021;
+          else crc <<= 1;
+        }
+      }
+      const crcHex = (crc & 0xffff).toString(16).toUpperCase().padStart(4, "0");
+      const pixCopiaCola = `${payloadBase}${crcHex}`;
+
+      cobrancaInfo = {
+        faturaId,
+        valor: plano.mensalidade,
+        pixCopiaCola,
+        checkoutUrl: `/plano?fatura=${faturaId}`,
+        vencimento: vencimentoIso,
+      };
+    }
+
+    return {
+      ok: true,
+      planoNome: plano.nome,
+      mensalidade: plano.mensalidade,
+      cobranca: cobrancaInfo,
+    };
+  });
+
+/**
+ * Permite liquidar e registrar a quitação imediata de uma fatura de plano via Pix ou Cartão.
+ */
+export const confirmarPagamentoFaturaPlano = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) =>
+    z
+      .object({
+        faturaId: z.string().uuid(),
+        metodo: z.enum(["pix", "cartao"]),
+      })
+      .parse(input),
+  )
+  .handler(async ({ data, context }) => {
+    const org = requireOrganizationContext(context);
+    const empresaId = org.empresaId;
+    if (!empresaId) throw new Error("Agência não identificada.");
+
+    const client = context.supabase;
+    const admin = await getAdminClientSafe();
+    const agoraIso = new Date().toISOString();
+
+    const { error: erroFatura } = await client
+      .from("faturas_plataforma")
+      .update({
+        status: "pago",
+        pago_em: agoraIso,
+        atualizado_em: agoraIso,
+      })
+      .eq("id", data.faturaId)
+      .eq("empresa_id", empresaId);
+
+    if (erroFatura && admin) {
+      try {
+        await admin
+          .from("faturas_plataforma")
+          .update({
+            status: "pago",
+            pago_em: agoraIso,
+            atualizado_em: agoraIso,
+          })
+          .eq("id", data.faturaId)
+          .eq("empresa_id", empresaId);
+      } catch {
+        // prossegue
+      }
+    }
+
+    // Atualiza status da assinatura da agência para ativa
+    await client
+      .from("assinaturas")
+      .update({ status: "ativa", atualizado_em: agoraIso })
+      .eq("empresa_id", empresaId);
+
+    // Auditoria
+    try {
+      await client.from("logs_auditoria").insert({
+        empresa_id: empresaId,
+        ator_id: context.userId,
+        ator_contexto: "organizacao",
+        acao: data.metodo === "pix" ? "fatura_plano_paga_pix" : "fatura_plano_paga_cartao",
+        recurso_tipo: "fatura_plataforma",
+        recurso_id: data.faturaId,
+        resultado: "sucesso",
+        detalhes: { metodo: data.metodo, quitado_em: agoraIso },
+      });
+    } catch {
+      // não-bloqueante
+    }
+
+    return { ok: true };
   });

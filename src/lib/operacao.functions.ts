@@ -3,7 +3,13 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { requireCapability } from "@/lib/autorizacao.server";
-import { salvarSessaoEvento } from "@/lib/ponto-store.server";
+import {
+  atualizarAuthHeaderSessao,
+  atualizarStatusPontoSessao,
+  buscarSessaoPorEventoId,
+  type PontoSessao,
+  salvarSessaoEvento,
+} from "@/lib/ponto-store.server";
 import { criarTokenQrCodeAssinado } from "@/lib/ponto.signed-token";
 
 const tipoPonto = z.enum(["entrada", "inicio_intervalo", "fim_intervalo", "saida"]);
@@ -22,6 +28,183 @@ async function contextoOperacao(
   }
   return { contexto, empresaId };
 }
+
+async function getAdminClientSafe() {
+  try {
+    const { hasAdminKey, supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    if (!hasAdminKey()) {
+      return null;
+    }
+    return supabaseAdmin;
+  } catch {
+    return null;
+  }
+}
+
+async function registrarAuditoria(
+  client: Parameters<typeof requireCapability>[0],
+  payload: {
+    empresa_id: string;
+    ator_id: string;
+    ator_contexto: "organizacao";
+    acao: string;
+    recurso_tipo: string;
+    recurso_id: string;
+    resultado: "sucesso" | "erro";
+    detalhes: Record<string, unknown>;
+  },
+) {
+  try {
+    const res = await client.from("logs_auditoria").insert(payload);
+    if (res?.error) {
+      const admin = await getAdminClientSafe();
+      if (admin) {
+        await admin.from("logs_auditoria").insert(payload);
+      }
+    }
+  } catch {
+    try {
+      const admin = await getAdminClientSafe();
+      if (admin) {
+        await admin.from("logs_auditoria").insert(payload);
+      }
+    } catch {
+      // Falha de auditoria não deve bloquear a operação
+    }
+  }
+}
+
+async function mesclarPontosSessao(
+  eventoId: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  equipes: any[],
+  supabase: Parameters<typeof requireCapability>[0],
+) {
+  const sessao = buscarSessaoPorEventoId(eventoId);
+  if (!sessao || !sessao.pontos || sessao.pontos.length === 0) {
+    return equipes;
+  }
+
+  const pontosParaSincronizarDb: Array<{
+    escalaId: string;
+    ponto: PontoSessao;
+  }> = [];
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const resultado = equipes.map((eq: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const escalasAtualizadas = (eq.escalas ?? []).map((es: any) => {
+      const pontosExistentes = es.pontos ?? [];
+      const pontosDaEscalaNaSessao = sessao.pontos.filter((p) => p.escalaId === es.id);
+
+      const novosPontos = [...pontosExistentes];
+
+      for (const pontoSessao of pontosDaEscalaNaSessao) {
+        const jaExiste = novosPontos.some(
+          (p: { id?: string; tipo?: string; registrado_em?: string }) =>
+            p.id === pontoSessao.id ||
+            (p.tipo === pontoSessao.tipo &&
+              Boolean(p.registrado_em) &&
+              Math.abs(
+                new Date(p.registrado_em!).getTime() -
+                  new Date(pontoSessao.registrado_em).getTime(),
+              ) < 300_000),
+        );
+
+        if (!jaExiste) {
+          novosPontos.push({
+            id: pontoSessao.id,
+            tipo: pontoSessao.tipo,
+            metodo: pontoSessao.foto_url ? "selfie" : "qrcode",
+            registrado_em: pontoSessao.registrado_em,
+            status: pontoSessao.status ?? "pendente",
+            foto_url: pontoSessao.foto_url ?? null,
+            gps_lat: pontoSessao.gps_lat ?? null,
+            gps_lng: pontoSessao.gps_lng ?? null,
+            fora_horario: pontoSessao.fora_horario ?? false,
+            motivo_recusa: null,
+            selfie_expira_em: null,
+          });
+
+          pontosParaSincronizarDb.push({
+            escalaId: es.id,
+            ponto: pontoSessao,
+          });
+        }
+      }
+
+      return {
+        ...es,
+        pontos: novosPontos,
+      };
+    });
+
+    return {
+      ...eq,
+      escalas: escalasAtualizadas,
+    };
+  });
+
+  // Tenta persistir os pontos que estavam apenas na sessão para o banco
+  if (pontosParaSincronizarDb.length > 0) {
+    for (const item of pontosParaSincronizarDb) {
+      try {
+        await supabase.from("pontos").insert({
+          id: item.ponto.id,
+          escala_id: item.escalaId,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          tipo: item.ponto.tipo as any,
+          metodo: item.ponto.foto_url ? "selfie" : "qrcode",
+          registrado_em: item.ponto.registrado_em,
+          foto_url: item.ponto.foto_url ?? null,
+          gps_lat: item.ponto.gps_lat ?? null,
+          gps_lng: item.ponto.gps_lng ?? null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          status: (item.ponto.status as any) || "pendente",
+          fora_horario: item.ponto.fora_horario ?? false,
+        });
+      } catch {
+        // Silencioso se der erro de chave ou já existir
+      }
+    }
+  }
+
+  return resultado;
+}
+
+export const carregarOperacaoEvento = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((input: unknown) => z.object({ eventoId: z.string().uuid() }).parse(input))
+  .handler(async ({ data, context }) => {
+    await requireCapability(context.supabase, context.userId, "operacao.supervisionar");
+
+    if (context.authHeader) {
+      atualizarAuthHeaderSessao(data.eventoId, context.authHeader);
+    }
+
+    const { data: equipesDb, error } = await context.supabase
+      .from("equipes")
+      .select(
+        "id, nome, escalas(id, status, freelancers(nome, funcao), pontos(id, tipo, metodo, registrado_em, status, foto_url, gps_lat, gps_lng, fora_horario, motivo_recusa, selfie_expira_em), ocorrencias(id, descricao, criado_em))",
+      )
+      .eq("evento_id", data.eventoId)
+      .order("criado_em");
+
+    if (error) {
+      const { data: fallbackData, error: fallbackError } = await context.supabase
+        .from("equipes")
+        .select(
+          "id, nome, escalas(id, status, freelancers(nome, funcao), pontos(id, tipo, metodo, registrado_em, status, foto_url, gps_lat, gps_lng), ocorrencias(id, descricao, criado_em))",
+        )
+        .eq("evento_id", data.eventoId)
+        .order("criado_em");
+
+      if (fallbackError) throw fallbackError;
+      return mesclarPontosSessao(data.eventoId, fallbackData ?? [], context.supabase);
+    }
+
+    return mesclarPontosSessao(data.eventoId, equipesDb ?? [], context.supabase);
+  });
 
 export const decidirPonto = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -53,8 +236,11 @@ export const decidirPonto = createServerFn({ method: "POST" })
       .maybeSingle();
     if (error) throw error;
     if (!ponto) throw new Error("Este ponto já foi decidido.");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("logs_auditoria").insert({
+
+    // Sincroniza também no ponto-store da sessão
+    atualizarStatusPontoSessao(data.escalaId, data.pontoId, data.status, data.motivo);
+
+    await registrarAuditoria(context.supabase, {
       empresa_id: empresaId,
       ator_id: context.userId,
       ator_contexto: "organizacao",
@@ -64,6 +250,7 @@ export const decidirPonto = createServerFn({ method: "POST" })
       resultado: "sucesso",
       detalhes: { escala_id: data.escalaId, motivo: data.motivo ?? null },
     });
+
     return { ok: true };
   });
 
@@ -94,8 +281,8 @@ export const lancarPontoManual = createServerFn({ method: "POST" })
       .select("id")
       .single();
     if (error) throw error;
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    await supabaseAdmin.from("logs_auditoria").insert({
+
+    await registrarAuditoria(context.supabase, {
       empresa_id: empresaId,
       ator_id: context.userId,
       ator_contexto: "organizacao",
@@ -105,6 +292,7 @@ export const lancarPontoManual = createServerFn({ method: "POST" })
       resultado: "sucesso",
       detalhes: { escala_id: data.escalaId, tipo: data.tipo, registrado_em: data.registradoEm },
     });
+
     return { ok: true };
   });
 
@@ -113,7 +301,7 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
   .validator((input: unknown) => z.object({ eventoId: z.string().uuid() }).parse(input))
   .handler(async ({ data, context }) => {
     const contexto = await requireCapability(context.supabase, context.userId, "eventos.gerenciar");
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const admin = await getAdminClientSafe();
 
     // Tenta primeiro com context.supabase (autenticado com RLS da agência)
     const { data: eventoAuth } = await context.supabase
@@ -123,13 +311,17 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
       .maybeSingle();
 
     let evento = eventoAuth;
-    if (!evento) {
-      const { data: eventoAdmin } = await supabaseAdmin
-        .from("eventos")
-        .select("id, empresa_id, nome, local, data_inicio, data_fim, status")
-        .eq("id", data.eventoId)
-        .maybeSingle();
-      evento = eventoAdmin;
+    if (!evento && admin) {
+      try {
+        const { data: eventoAdmin } = await admin
+          .from("eventos")
+          .select("id, empresa_id, nome, local, data_inicio, data_fim, status")
+          .eq("id", data.eventoId)
+          .maybeSingle();
+        evento = eventoAdmin;
+      } catch {
+        // ignora
+      }
     }
 
     if (!evento || evento.empresa_id !== contexto.empresaId) {
@@ -152,7 +344,7 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
     const expiraEm = dataFinalExpira.toISOString();
     const token = crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
 
-    // Atualiza prioritariamente via context.supabase com fallback para supabaseAdmin
+    // Atualiza prioritariamente via context.supabase com fallback para admin
     const { error: erroUpdateAuth } = await context.supabase
       .from("eventos")
       .update({
@@ -163,21 +355,29 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
       .eq("id", data.eventoId);
 
     if (erroUpdateAuth) {
-      const { error: erroUpdateAdmin } = await supabaseAdmin
-        .from("eventos")
-        .update({
-          qr_code_token: token,
-          qr_code_gerado_em: geradoEm.toISOString(),
-          qr_code_expira_em: expiraEm,
-        })
-        .eq("id", data.eventoId);
+      if (admin) {
+        try {
+          const { error: erroUpdateAdmin } = await admin
+            .from("eventos")
+            .update({
+              qr_code_token: token,
+              qr_code_gerado_em: geradoEm.toISOString(),
+              qr_code_expira_em: expiraEm,
+            })
+            .eq("id", data.eventoId);
 
-      if (erroUpdateAdmin) {
+          if (erroUpdateAdmin) {
+            throw new Error(`Falha ao atualizar QR Code do evento: ${erroUpdateAuth.message}`);
+          }
+        } catch {
+          throw new Error(`Falha ao atualizar QR Code do evento: ${erroUpdateAuth.message}`);
+        }
+      } else {
         throw new Error(`Falha ao atualizar QR Code do evento: ${erroUpdateAuth.message}`);
       }
     }
 
-    const logPayload = {
+    await registrarAuditoria(context.supabase, {
       empresa_id: evento.empresa_id,
       ator_id: context.userId,
       ator_contexto: "organizacao",
@@ -189,16 +389,7 @@ export const rotacionarQrEvento = createServerFn({ method: "POST" })
         token_gerado: token.slice(0, 8) + "...",
         expira_em: expiraEm,
       },
-    };
-
-    try {
-      const resAudit = await context.supabase.from("logs_auditoria").insert(logPayload);
-      if (resAudit.error) {
-        await supabaseAdmin.from("logs_auditoria").insert(logPayload);
-      }
-    } catch {
-      // Falha de auditoria não-bloqueante
-    }
+    });
 
     const signedToken = criarTokenQrCodeAssinado({
       id: evento.id,

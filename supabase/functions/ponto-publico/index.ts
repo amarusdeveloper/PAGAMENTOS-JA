@@ -298,11 +298,18 @@ async function registrar(supabase: AdminClient, input: Record<string, unknown>) 
     const formato = partesFoto[1];
     const bytes = Uint8Array.from(atob(partesFoto[2]!), (caractere) => caractere.charCodeAt(0));
     const caminho = `${evento.empresa_id}/${escala.id}/${crypto.randomUUID()}.${formato === "jpeg" ? "jpg" : formato}`;
-    const { error } = await supabase.storage
-      .from("selfies-ponto")
-      .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
-    failIfError(error, "Não foi possível armazenar a selfie");
-    fotoUrl = caminho;
+    try {
+      const { error } = await supabase.storage
+        .from("selfies-ponto")
+        .upload(caminho, bytes, { contentType: `image/${formato}`, upsert: false });
+      if (!error) {
+        fotoUrl = caminho;
+      } else {
+        fotoUrl = fotoBase64;
+      }
+    } catch {
+      fotoUrl = fotoBase64;
+    }
   }
 
   const { data: existentes, error: erroExistentes } = await supabase
